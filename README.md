@@ -11,103 +11,369 @@ The goals of this project:
 
 ## Status
 
-Phases 1–3 and the AeroSpace-style accordion for tabbed layouts are done and
-running live. Phase 4 (multi-monitor) is built and verified on the nested
-session's two virtual screens; it still needs a check on real monitors. See [PLAN.md](PLAN.md) for the design, the i3 feature
-feasibility tables and the milestones.
+Phases 1–4 are implemented: tiling, the i3 commands, focus parent/child and
+multi-monitor support, plus an AeroSpace-style accordion for tabbed layouts.
+Everything up to the accordion is in daily use. Multi-monitor support is
+verified on virtual screens and still needs a check on real monitors. Next is
+phase 5, a settings dialog in System Settings. See [PLAN.md](PLAN.md) for the
+design and the milestones.
 
-## How to use
+## Contents
 
-*The full guide is written as features land (phase 5 finishes it).*
+- [Requirements](#requirements)
+- [Installation](#installation)
+- [First-time setup](#first-time-setup)
+- [Using k3](#using-k3)
+- [Settings](#settings)
+- [Troubleshooting](#troubleshooting)
+- [Uninstalling](#uninstalling)
+- [Differences from i3](#differences-from-i3)
+- [Development](#development)
+- [Project notes](#project-notes)
 
-What k3 does today:
-- **New windows:** each normal window on a desktop is tiled side by side with
-  the others, and a new window opens right after the focused one.
-- **Floating:** dialogs, modal or fixed-size windows, utility windows, and
-  windows that skip the taskbar float, and k3 leaves them alone.
-- **Your existing KDE keys keep working.** Moving a window to another desktop
-  or screen moves it in the layout. *Keep on all desktops* takes a window out
-  of the tiling until you turn it off again. A minimized window leaves the
-  layout and comes back next to the focused window when restored.
-- **Fullscreen and maximized windows** cover the screen while the others keep
-  their places. A restored window returns to its slot.
-- **Snap-back:** a tiled window that you quick-tile (Meta+arrow) or drag
-  returns to its slot.
+## Requirements
+
+- KDE Plasma 6 on **Wayland**. k3 is developed on Plasma/KWin 6.8.2;
+  X11 sessions are untested.
+- To install from source: `make`, `kpackagetool6`, `kwriteconfig6` and
+  `qdbus6`. On Arch Linux these come from the `make`, `kpackage`, `kconfig`
+  and `qt6-tools` packages.
+- Optional:
+  - Plasma 6.7 or newer, for switching desktops independently on each
+    screen;
+  - `qt6-declarative`, to run the unit tests.
+
+## Installation
+
+```sh
+git clone <repository-url> k3     # or copy this directory
+cd k3
+make install    # build the script and install it to ~/.local/share/kwin/scripts/k3
+make enable     # turn it on and load it into the running KWin
+```
+
+- **Enabling from System Settings instead:** go to Window Management → KWin
+  Scripts, tick **k3** and click Apply. This is the same as `make enable`.
+- **Checking it's running:** this command prints `true`:
+  ```sh
+  qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.isScriptLoaded k3
+  ```
+- **What happens when it loads:** k3 tiles the existing windows on every
+  desktop, side by side in a row. If you turn it off again (`make disable`),
+  windows stay where k3 put them.
+- **Updating:** after pulling changes, run `make reload`. It reinstalls and
+  restarts k3, and says so if k3 fails to load.
+
+## First-time setup
+
+### 1. Clear key conflicts
+
+k3 uses **Alt** as its modifier (see [Keybindings](#keybindings)). KDE
+doesn't refuse a duplicate binding: if another action already has one of
+k3's keys, both actions get it, and which one fires is undefined. k3's
+defaults don't collide with KWin's own default shortcuts, but your own
+shortcuts might. With k3 loaded, run:
+
+```sh
+make check-keys
+```
+
+It lists every key that a k3 action shares with another action, along with
+both owners. Unbind one side in **System Settings → Keyboard → Shortcuts**
+(the search box finds actions by name), then run it again until it reports
+no conflicts.
+
+Global shortcuts always win over applications, so apps no longer receive
+k3's keys. For example, Emacs loses M-/ and M-, to Alt+/ and Alt+,, and Alt+H
+no longer opens a Help menu. Rebind any k3 action that gets in your way (see
+[Changing keybindings](#changing-keybindings)).
+
+### 2. Bind KDE's own actions for the rest of i3
+
+k3 doesn't duplicate actions KDE already has. Bind them yourself, and k3
+follows whatever they do to a window. These i3-style keys are only
+suggestions; check them with `make check-keys` afterwards.
+
+| i3 | KDE action (Keyboard → Shortcuts) | Suggested key |
+|---|---|---|
+| `workspace N` | Switch to Desktop N | Alt+1 … Alt+9 |
+| `move container to workspace N` | Window to Desktop N | Alt+Shift+1 … Alt+Shift+9 |
+| `fullscreen toggle` | Make Window Fullscreen | Alt+F |
+| `kill` | Close Window | Alt+Shift+Q |
+| `sticky toggle` | Keep Window on All Desktops | — |
+| `focus output next` | Switch to Next Screen | — |
+| `move container to output next` | Window to Next Screen | — |
+| `exec terminal` | Add New → Application, then pick your terminal | Alt+Return |
+| dmenu | KRunner | Alt+Space (KDE's default) |
+
+KDE records Alt+Shift+1 as Alt+!, Alt+Shift+2 as Alt+@ and so on; that's
+expected. Create as many desktops as you want workspaces in **System Settings
+→ Window Management → Virtual Desktops**.
+
+### 3. Optional KDE settings
+
+- **Switching desktops independently on each screen** (Plasma 6.7+) is
+  closer to i3's workspace-per-monitor. It's in Window Management → Virtual
+  Desktops.
+- **Focus follows mouse:** Window Management → Window Behavior → Focus. k3
+  keeps track of focus however it changes.
+- **Gaps, sliver width, floating rules:** see [Settings](#settings).
+
+## Using k3
+
+### How layouts work
+
+- **Every screen and desktop has its own layout**, the equivalent of an i3
+  workspace.
+- **A layout is a tree.** Containers arrange their children as a **row**
+  (split horizontal), a **column** (split vertical), or **tabs**. Windows
+  are the leaves.
+- **New windows go after the focused window,** in the focused window's
+  container. To choose where the *next* window goes, split first.
+- **Containers remember their last-focused child.** Moving focus into a
+  container lands there.
+- **Containers tidy themselves up.** An empty container disappears. A
+  container left with a single window dissolves into its parent, unless you
+  just split it and it's waiting for its second window.
 
 ### Keybindings
 
-Every k3 action is listed in **System Settings → Keyboard → Shortcuts →
-KWin**; search for "k3" to rebind any of them. A rebind takes effect
-immediately, and k3's code defaults never override it. Afterwards, run
-`make check-keys` to catch a key that's also bound elsewhere.
+Every k3 action is in **System Settings → Keyboard → Shortcuts → KWin**, named
+"k3: …".
 
-| Action | Default | Notes |
+| Action | Default | What it does |
 |---|---|---|
-| Focus left / down / up / right | Alt+H / J / K / L | Entering a container lands on its last-focused window. In tabs, the keys along the tabs' direction switch tabs. At the edge of a screen, focus continues onto the next screen, including an empty one. |
-| Move left / down / up / right | Alt+Shift+H / J / K / L | Swaps with a neighbor, enters a neighboring container, or steps out of the current one. In tabs, reorders them; past the first or last tab, the tab pops out. At the edge of a screen, the window moves to the next screen. |
-| Shrink width / grow height / shrink height / grow width | Ctrl+Alt+H / J / K / L | `resizeStep` % of the parent per press |
-| Split horizontal / vertical | Alt+Shift+B / Alt+Shift+V | The next window opens beside / below the focused one |
-| Toggle split direction | Alt+/ | Flips the focused window's container between row and column; turns tabs back into a split |
-| Toggle tabbed | Alt+, | An accordion with no tab bar: slivers of the hidden tabs show beside the visible one (see below) |
-| Toggle floating | Alt+Shift+Space | A floated window stays above the tiled ones (`floatAbove`) |
-| Focus parent / child | Alt+Shift+U / Alt+Shift+D | Selects the container around the focused window, one level up per press. Move, split, layout, resize and focus then act on the whole container, which is shown with KWin's translucent outline. Any focus change or mouse movement ends the selection. |
-| Focus tiled ↔ floating | *(none)* | |
-| Retile | *(none)* | Recovery: re-checks every window and re-applies the layouts |
+| k3: Focus Left / Down / Up / Right | Alt+H / J / K / L | Focus the neighboring window. Entering a container lands on its last-focused window. In tabs, the keys along the tabs' direction switch tabs. At the edge of a screen, focus goes on to the next screen, even an empty one. |
+| k3: Move Left / Down / Up / Right | Alt+Shift+H / J / K / L | Swap with the neighboring window, move into the neighboring container, or step out of the current one. In tabs, reorder them; past the first or last tab, the tab pops out. At the edge of a screen, the window moves to the next screen. |
+| k3: Grow Width / Shrink Width | Ctrl+Alt+L / Ctrl+Alt+H | Resize by `resizeStep` (default 5%) of the container, trading space with the neighbor. Nothing gets smaller than 5%. |
+| k3: Grow Height / Shrink Height | Ctrl+Alt+J / Ctrl+Alt+K | The same, vertically |
+| k3: Split Horizontal / Split Vertical | Alt+Shift+B / Alt+Shift+V | The next window opens beside / below the focused one |
+| k3: Toggle Split Direction | Alt+/ | Flip the container between row and column; tabs turn back into the split they came from |
+| k3: Toggle Tabbed | Alt+, | Turn the container into tabs (an accordion), and back |
+| k3: Toggle Floating | Alt+Shift+Space | Float a tiled window, or tile a floating one |
+| k3: Focus Parent / Focus Child | Alt+Shift+U / Alt+Shift+D | Select the container around the focused window, one level up per press / step back down |
+| k3: Focus Tiled/Floating | *(none)* | Jump between the tiled and the floating windows of this screen and desktop |
+| k3: Retile | *(none)* | Recovery: re-check every window and re-apply the visible layouts |
 
-The rest of i3's keys are KDE's own actions, which k3 follows: switch to or
-move to desktop N, fullscreen, close, keep on all desktops, and switch to or
-move to the next screen.
+#### Changing keybindings
 
-**Tabbed layout (accordion).** This follows AeroSpace's accordion rather
-than i3's tabbed layout.
-- **Direction:** whole-screen tabs run left/right (Alt+H/L). Tabs next to
-  another window run the other way, so with `[A | tabs]` Alt+H/L go between
-  A and the tabs while Alt+J/K step through the tabs. The 30px slivers
-  (`tabPadding`) point the same way.
-- **Pop out:** Alt+Shift+H/L reorder tabs. Past the first or last tab, the
-  tab pops out beside the others (from 3+ tabs the rest turn to up/down;
-  from 2, you get a plain split).
+Rebind any action in System Settings → Keyboard → Shortcuts (search "k3").
+A change takes effect immediately. Your bindings survive k3 updates: if a
+new k3 version changes a default, the binding you already have is kept.
+Run `make check-keys` afterwards to catch duplicates.
+
+### Example
+
+Starting from one window, A:
+
+1. Open B: `[A | B]`.
+2. On B, press Alt+Shift+V, then open C. C opens below B: `[A | [B / C]]`.
+3. Press Alt+Shift+U to select `[B / C]`, then Alt+Shift+H to move it
+   left: `[[B / C] | A]`.
+4. Press Alt+Shift+D to step back down to the window, then Alt+, to turn B
+   and C into tabs. Alt+J/K now switch between B and C, and Alt+L goes to A.
+
+### Tabbed layout (accordion)
+
+This follows [AeroSpace](https://github.com/nikitabobko/AeroSpace)'s
+accordion rather than i3's tabbed layout.
+
+- **One tab is visible.** 30px slivers of the others peek out beside it
+  (`tabPadding`). There's no tab bar.
+- **The direction follows the position.** Tabs that fill the screen run
+  left/right (Alt+H/L switch them). Tabs next to another window run the other
+  way: in `[A | tabs]`, Alt+H/L go between A and the tabs, and Alt+J/K step
+  through the tabs. The slivers point the same way.
+- **Pop out:** moving along the tabs' direction reorders them. Past the
+  first or last tab, the tab pops out beside the others. From 3+ tabs the
+  remaining ones switch direction; from 2, you get a plain split.
 - **Merge back:** moving the popped-out window back toward the tabs puts it
-  in again.
+  in again. Moving a tab across the tabs' direction moves it out like any
+  other move.
+- **Back to a split:** Alt+/ or Alt+, turns the tabs back into the split
+  they came from.
 
-**Before enabling k3, unbind the KDE actions that use the same keys.** KDE
-doesn't refuse a duplicate: both actions get the key, and which one fires is
-undefined. With your current setup that means *Walk Through Windows* (all
-four Alt+H/J/K/L variants) and *Quick Tile Window* Left/Bottom/Top/Right
-(Alt+Shift+H/J/K/L). After loading k3, run:
+### Floating windows
+
+- **Floated automatically:**
+  - dialogs and utility windows;
+  - transient and modal windows;
+  - windows that can't be resized;
+  - windows that skip the taskbar;
+  - classes listed in `floatClasses`.
+
+  k3 never moves a floating window.
+- **Ignored completely:** panels, popups, notifications, on-screen displays,
+  and classes listed in `ignoreClasses`.
+- **Toggle Floating on a tiled window:** it floats at the size and place it
+  had before k3 tiled it. If that nearly fills the screen (apps often reopen
+  at their last tiled size), it's centered at two thirds of the screen
+  instead. It also stays above the tiled windows (`floatAbove`).
+- **Toggle Floating on a floating window:** it's tiled after the focused
+  window. This works on automatically floated windows too.
+- **Temporarily untiled windows:** a minimized window, or one kept on all
+  desktops, leaves the layout until that ends.
+
+### Selecting containers (focus parent / child)
+
+- **Selecting:** Alt+Shift+U selects the container around the focused
+  window. Each further press goes one level up, stopping below the whole
+  screen. KWin's translucent outline marks the selection.
+- **What acts on the selection:** move, split, Toggle Split Direction,
+  Toggle Tabbed, resize and focus all act on the whole container, so
+  Alt+Shift+H swaps it with its neighbor as a unit. Toggle Floating still
+  acts on the window, and a selected container doesn't move to another
+  screen.
+- **Deselecting:** Alt+Shift+D steps back down; reaching the window ends the
+  selection. Any focus change, desktop switch or **mouse movement** also ends
+  it. KWin's outline would otherwise block clicks.
+
+### Fullscreen, maximize and minimize
+
+- **Fullscreen and maximize** work as usual: the window covers the screen
+  while the others keep their places, and on restore it returns to its slot.
+- **A window that opens maximized** is un-maximized and tiled.
+- **Minimized windows** leave the layout. When restored, they come back after
+  the focused window.
+
+### Desktops and screens
+
+- **Desktops:** use KDE's desktop actions (see
+  [setup](#2-bind-kdes-own-actions-for-the-rest-of-i3)). A window moved to
+  another desktop joins that desktop's layout after its focused window.
+- **Several monitors:**
+  - **Crossing screens:** focus and move continue onto the next screen at
+    the edge of a screen's layout, including onto an empty screen.
+  - **Which screen is next:** screens count as neighbors when they're side
+    by side or stacked, not diagonal.
+  - **KDE's screen actions:** *Window to Next Screen* works as well.
+- **Unplugging a monitor:** KWin moves its windows to a remaining screen and
+  k3 tiles them there, in the order they arrive. On replug, KWin moves them
+  back.
+- **Per-screen desktops** (Plasma 6.7+): a window moved to another screen
+  lands on the desktop that screen is showing.
+- Multi-monitor support is verified on virtual screens; testing on real
+  monitors is still to come.
+
+### Mouse
+
+- **Tiled windows snap back:** a tiled window you drag, or quick-tile
+  (Meta+arrow, dragging to a screen edge), returns to its slot. Use the move
+  keys to rearrange.
+- **Clicking a window focuses it** as usual. Clicking a tab's sliver should
+  also switch to that tab, since a click activates the window; that hasn't
+  been tested yet.
+- **Floating windows** can be dragged and resized freely.
+
+## Settings
+
+k3's settings live in the `[Script-k3]` group of `kwinrc`. Until phase 5 adds
+a settings dialog, set them with `kwriteconfig6` and then run `make reload`.
+
+| Key | Default | Meaning |
+|---|---|---|
+| `gapsInner` | `4` | px between tiled windows |
+| `gapsOuter` | `4` | px between tiled windows and the screen edge |
+| `tabPadding` | `30` | px of each hidden tab left showing beside the visible one (`0` = a plain stack) |
+| `resizeStep` | `5` | % of the container per resize press |
+| `floatAbove` | `true` | windows you float stay above the tiled ones |
+| `floatClasses` | `org.kde.spectacle,org.kde.polkit-kde-authentication-agent-1,pinentry-qt` | window classes that always float |
+| `ignoreClasses` | `plasmashell,krunner,ksmserver-logout-greeter,xwaylandvideobridge` | window classes k3 never touches |
 
 ```sh
-make check-keys   # lists every key a k3 shortcut shares with another action
-```
-
-### Settings
-
-Until phase 5 adds a dialog, set these with `kwriteconfig6`. The class lists
-are comma-separated and matched against a window's class or name:
-
-```sh
-kwriteconfig6 --file kwinrc --group Script-k3 --key gapsInner 8      # px between windows (default 4)
-kwriteconfig6 --file kwinrc --group Script-k3 --key gapsOuter 8      # px at screen edges (default 4)
-kwriteconfig6 --file kwinrc --group Script-k3 --key resizeStep 10    # % of the parent per resize press (default 5)
-kwriteconfig6 --file kwinrc --group Script-k3 --key tabPadding 20    # px of hidden tabs showing (default 30, 0 = none)
-kwriteconfig6 --file kwinrc --group Script-k3 --key floatAbove false # don't keep floated windows above (default true)
-kwriteconfig6 --file kwinrc --group Script-k3 --key floatClasses "org.kde.spectacle,steam"
-kwriteconfig6 --file kwinrc --group Script-k3 --key ignoreClasses "plasmashell,krunner"
+kwriteconfig6 --file kwinrc --group Script-k3 --key gapsInner 8
+kwriteconfig6 --file kwinrc --group Script-k3 --key floatClasses \
+    "org.kde.spectacle,org.kde.polkit-kde-authentication-agent-1,pinentry-qt,steam"
 make reload
 ```
+
+- **Class lists** are comma-separated and matched case-insensitively
+  against a window's class or name. Setting one **replaces** its default
+  list, so include the defaults you want to keep.
+- **Finding a window's class:** run `make logs`, then open the window. k3
+  logs `[k3] tile <class>` or `[k3] float <class>`.
+- **Back to a default:** `kwriteconfig6 --file kwinrc --group Script-k3 --key
+  gapsInner --delete`, then `make reload`.
+
+## Troubleshooting
+
+- **Nothing tiles:** check that `qdbus6 org.kde.KWin /Scripting
+  org.kde.kwin.Scripting.isScriptLoaded k3` prints `true`. If it doesn't,
+  run `make reload`; it reports when k3 fails to load.
+- **Errors:** `make logs` follows k3's log. A `[k3] error: …` line (with a
+  stack trace) is a bug; please report it.
+- **A key does nothing, or something else happens:** run
+  `make check-keys`.
+- **A layout looks wrong:** bind and press *k3: Retile*. Reloading k3, or
+  restarting KWin or the session, rebuilds every layout from scratch as a
+  single row per screen and desktop. k3 can't save layouts.
+- **A window tiles but should float, or the other way round:** toggle it
+  with Alt+Shift+Space. To make it permanent, find its class with
+  `make logs` and add it to `floatClasses`.
+- **Clicks don't reach a window:** if a container is selected (the outline is
+  showing), move the mouse first; that ends the selection.
+- **Turning k3 off:** run `make disable`, or untick it in KWin Scripts.
+  Windows stay where they are.
+
+## Uninstalling
+
+```sh
+make uninstall    # disable k3 and remove the installed script
+```
+
+KDE keeps k3's actions in its shortcut list. To remove them too:
+
+```sh
+for id in $(grep -o '^k3-[a-z-]*' ~/.config/kglobalshortcutsrc); do
+    busctl --user call org.kde.kglobalaccel /kglobalaccel \
+        org.kde.KGlobalAccel unregister ss kwin "$id"
+done
+```
+
+Any settings you made stay in `kwinrc`. Remove them with
+`kwriteconfig6 --file kwinrc --group Script-k3 --key <key> --delete`.
+
+## Differences from i3
+
+- **Window decorations:** k3 draws no tab bars or colored borders. KDE's
+  titlebars stay, tabs are an accordion, and the selected container is shown
+  with KWin's outline.
+- **No binding modes** such as i3's resize mode. Resizing has its own keys.
+- **No config file, `i3-msg` or IPC.** Keys live in System Settings and
+  settings in `kwinrc`.
+- **Workspaces are KDE virtual desktops.** k3 doesn't create or remove them,
+  and KWin can't move a desktop to another monitor.
+- **Tab direction follows position** (as in AeroSpace) instead of i3's
+  separate tabbed and stacked layouts.
+- **Not implemented (yet):** scratchpad, marks, `workspace back_and_forth`,
+  mouse warping, and saving or restoring layouts. See the backlog in
+  [PLAN.md](PLAN.md).
 
 ## Development
 
 ```sh
-make test                  # unit tests (Qt 6 qmltestrunner, offscreen)
-make install enable        # install the package into ~/.local/share/kwin/scripts and turn it on
-make reload                # after editing src/: rebuild and restart k3 in the live session
-make logs                  # follow k3's log lines in the journal (errors show as "[k3] error: …")
-make check-keys            # keys a k3 shortcut shares with another action
+make test          # unit tests for the layout tree (Qt 6 qmltestrunner, offscreen)
+make build         # concatenate src/*.js into package/contents/code/main.js
+make reload        # install the build and (re)start k3 in the live session
+make logs          # follow k3's log lines in the journal
+make check-keys    # keys a k3 shortcut shares with another action
 make disable / uninstall
 ```
 
-Safe testing in a nested KWin (2 virtual screens, isolated config):
+| Path | Contents |
+|---|---|
+| `src/config.js` | settings and their defaults |
+| `src/tree.js` | the layout tree and layout math. It doesn't call KWin, so `test/tst_tree.qml` unit-tests it directly. |
+| `src/kwin.js` | which windows tile, window events, applying geometry |
+| `src/commands.js` | the commands behind the shortcuts |
+| `src/main.js` | the shortcut table and startup |
+| `package/` | the KWin script package. `contents/code/main.js` is generated by `make build`; never edit it. |
+| `tools/check-keys.awk` | the duplicate-key check behind `make check-keys` |
+
+`src/*.js` are concatenated in the order `SRC` in the Makefile sets.
+
+**Safe testing in a nested KWin.** It has 2 virtual screens, its own D-Bus
+session, and a config that starts empty every time:
 
 ```sh
 make nested HEADLESS=1 &   # or without HEADLESS to get a visible window
@@ -118,8 +384,9 @@ grep '\[k3\]' .dev/nested.log
 make nested-stop
 ```
 
-`src/*.js` are concatenated (order set by `SRC` in the Makefile) into
-`package/contents/code/main.js`. That file is generated, so never edit it.
+Inside it, `spectacle -b -n -f -o shot.png` takes screenshots, and
+`kscreen-doctor output.Virtual-1.disable` / `.enable` simulates unplugging a
+screen.
 
 ## Project notes
 
@@ -139,12 +406,21 @@ make nested-stop
     stacked is dropped.
   - v1 scope: core features, plus multi-monitor and focus parent/child.
     Scratchpad and mouse sync are in the backlog.
+- **2026-11-02: selection indicator.**
+  - Focus parent shows the selected container with KWin's outline.
+  - The outline swallows clicks, so mouse movement ends the selection. This
+    was chosen over flashing the outline or dimming the other windows.
 - **2026-11-02: tabbed becomes an AeroSpace-style accordion.**
   - Slivers of the hidden tabs show beside the visible one.
   - The tabs' direction follows their position (across the parent's
     direction), so it covers what i3's "stacked" was for.
   - Moving past the first or last tab pops it out; moving it back merges it.
   - This deliberately departs from i3's tabbed layout.
+- **2026-11-02: default keys Alt+, (Toggle Tabbed) and Alt+/ (Toggle Split
+  Direction)**, after AeroSpace's `alt-comma` / `alt-slash`. They were
+  Alt+Shift+W and Alt+Shift+T.
+- **2026-11-02: phase 4 built and tested on virtual screens** ahead of real
+  two-monitor hardware.
 
 ### Environment (dev machine)
 
@@ -153,11 +429,12 @@ make nested-stop
 - 11 fixed, named virtual desktops (scratch1, scratch2, scratch, reading,
   messages, notes, video calls, code, emacs, all, photos), switched with
   Alt+letter and moved to with Alt+Shift+letter.
-- `kde_plasma_config/` holds backups of the KDE config. `backup_kde` and
-  `restore_kde` copy them to and from `~/.config`. `pre_krohnkite/` and
-  `post_krohnkite/` are snapshots from an earlier Krohnkite experiment.
-- Tools available: `kpackagetool6`, `kwriteconfig6`/`kreadconfig6`, `qdbus6`,
-  `qmltestrunner`, `make`. Node is **not** installed.
+- `kde_plasma_config/` holds backups of the KDE config. It's kept locally
+  and git-ignored. `backup_kde` and `restore_kde` copy the files to and from
+  `~/.config`.
+- Tools: `kpackagetool6`, `kwriteconfig6`/`kreadconfig6`, `qdbus6`,
+  `busctl`, `kscreen-doctor`, `make`, and Qt 6's
+  `/usr/lib/qt6/bin/qmltestrunner`. Node is **not** installed.
 
 ### KWin scripting notes
 
@@ -235,9 +512,11 @@ Window API:
   with an empty class, `normalWindow=true`, on all desktops). It stays until
   `hideOutline()`. In the nested session it's an opaque gray fill.
 
-Still open:
-- What the outline looks like in the live, Plasma-themed session (phase 3).
-- Whether the host's shortcuts leak into a *windowed* nested session.
+Open questions at the time:
+- What the outline looks like in the live, Plasma-themed session. *Answered
+  in phase 3: translucent, but it swallows clicks.*
+- Whether the host's shortcuts leak into a *windowed* nested session. *Still
+  untested.*
 
 Confirmed by hand: `k3-hello`, bound to a key in System Settings, logged
 `[k3] hello …` when pressed in the live session.
@@ -292,6 +571,40 @@ Focus and geometry:
   `kglobalshortcutsrc`: keys are joined by a literal `\t`, and an escaped
   comma is `\\,`.
 
+### Phase 3 findings (2026-11-02)
+
+- **The outline is KWin's quick-tile preview.**
+  `/usr/share/kwin/outline/plasma/outline.qml` draws Plasma's
+  `widgets/translucentbackground` frame. It animates when `showOutline` is
+  called again with a new rect, so it can follow a container as it moves.
+- **It's translucent.** In the nested session it washes over the selected
+  container rather than hiding it; the opaque gray seen in phase 0 didn't
+  recur. There's only one outline in KWin, so k3 keeps a single global
+  selection.
+- **The outline swallows clicks** (checked live). It's an input-grabbing
+  window that a script can't make click-through. k3 therefore ends the
+  selection on `workspace.cursorPosChanged`. KWin doesn't emit that signal
+  when windows move under a still pointer, so keyboard use keeps the
+  selection.
+- **KWin scripts have `QTimer`** (`new QTimer()`, with `interval`,
+  `singleShot`, `timeout`, `start()`), but no `setTimeout`. `window.opacity`
+  is writable.
+
+### Accordion findings (2026-11-02)
+
+- **The nested KWin is on D-Bus only after its Wayland socket appears.**
+  Scripts that wait for the socket and then call D-Bus race it, so
+  `make nested-load` now waits until `org.kde.KWin` answers (up to 10s).
+- **Retiling on every activation is cheap.** k3 only sets geometry that
+  changed, and focus switches outside tabs cause zero geometry changes.
+- **New default keys don't reach existing installs.** A script shortcut is
+  stored as `k3-x=<key>,none,…`, with no default recorded, so the stored key
+  always wins over a changed default in the code. To pick up a new default,
+  rebind it in System Settings, or `unregister` the id over D-Bus and reload.
+- **Make expands `$(shell …)` before a recipe runs.** A recipe that waits for
+  a file another process rewrites has to read it in the shell (`$$(cat …)`).
+  Otherwise it keeps polling the old value.
+
 ### Phase 4 findings (2026-11-02)
 
 Geometry:
@@ -321,43 +634,9 @@ Desktops:
   `make nested` now empties `.dev/config` on every start. k3 itself keys
   spaces by desktop id, never by name.
 
-### Accordion findings (2026-11-02)
-
-- **The nested KWin is on D-Bus only after its Wayland socket appears.**
-  Scripts that wait for the socket and then call D-Bus race it, so
-  `make nested-load` now waits until `org.kde.KWin` answers (up to 10s).
-- **Retiling on every activation is cheap.** k3 only sets geometry that
-  changed, and focus switches outside tabs cause zero geometry changes.
-- **New default keys don't reach existing installs.** A script shortcut is
-  stored as `k3-x=<key>,none,…`, with no default recorded, so the stored key
-  always wins over a changed default in the code. To pick up a new default,
-  rebind it in System Settings, or `unregister` the id over D-Bus and reload.
-- **Make expands `$(shell …)` before a recipe runs.** A recipe that waits for
-  a file another process rewrites has to read it in the shell (`$$(cat …)`).
-  Otherwise it keeps polling the old value.
-
-### Phase 3 findings (2026-11-02)
-
-- **The outline is KWin's quick-tile preview.**
-  `/usr/share/kwin/outline/plasma/outline.qml` draws Plasma's
-  `widgets/translucentbackground` frame. It animates when `showOutline` is
-  called again with a new rect, so it can follow a container as it moves.
-- **It's translucent.** In the nested session it washes over the selected
-  container rather than hiding it; the opaque gray seen in phase 0 didn't
-  recur. There's only one outline in KWin, so k3 keeps a single global
-  selection.
-- **The outline swallows clicks** (checked live). It's an input-grabbing
-  window that a script can't make click-through. k3 therefore ends the
-  selection on `workspace.cursorPosChanged`. KWin doesn't emit that signal
-  when windows move under a still pointer, so keyboard use keeps the
-  selection.
-- **KWin scripts have `QTimer`** (`new QTimer()`, with `interval`,
-  `singleShot`, `timeout`, `start()`), but no `setTimeout`. `window.opacity`
-  is writable.
-
-
 ### References
 
 - KWin scripting API: https://develop.kde.org/docs/plasma/kwin/api/
 - Expanded unofficial API docs: https://zeroxoneafour.github.io/kwin-scripting-docs/workspace.html
 - i3 user guide: https://i3wm.org/docs/userguide.html
+- AeroSpace (accordion layout): https://github.com/nikitabobko/AeroSpace
