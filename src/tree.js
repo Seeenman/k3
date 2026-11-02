@@ -120,12 +120,18 @@ function rootOf(node) {
 }
 
 // --- i3 commands ------------------------------------------------------------
-// Directions are "left", "right", "up", "down". Tabbed containers count as
-// horizontal, as in i3: left/right moves between tabs.
+// Directions are "left", "right", "up", "down".
 
-function axisOf(con) { return con.layout === "splitv" ? "v" : "h"; }
+// splith is "h" and splitv "v". A tabbed container's tabs run across its
+// parent's axis, so the parent's own direction keys still move between its
+// parts (AeroSpace's rule, unlike i3); a tabbed root runs horizontally.
+function axisOf(con) {
+    if (con.layout === "tabbed") return con.parent && axisOf(con.parent) === "h" ? "v" : "h";
+    return con.layout === "splitv" ? "v" : "h";
+}
 function dirAxis(dir) { return dir === "left" || dir === "right" ? "h" : "v"; }
 function isForward(dir) { return dir === "right" || dir === "down"; }
+function splitFor(dir) { return dirAxis(dir) === "h" ? "splith" : "splitv"; }
 
 // The subtree next to node in direction dir: the sibling on that side under
 // the nearest ancestor split along dir's axis. null at the workspace edge.
@@ -139,8 +145,8 @@ function neighbor(node, dir) {
 }
 
 // i3 "move <dir>": swap with the neighbouring window, enter the neighbouring
-// container, or step out of the current one. Returns false when node is
-// already at the edge of the workspace.
+// container, or step out of the current one; past the last tab, pop out of
+// the tabs. Returns false when node is already at the edge of the workspace.
 function moveNode(node, dir) {
     const parent = node.parent;
     const root = rootOf(node);
@@ -162,6 +168,17 @@ function moveNode(node, dir) {
             focusNode(node);
             return true;
         }
+        // Past the last tab: split the tabs' place along dir's axis and put
+        // node on that side. The remaining tabs now run the other way, or a
+        // lone remaining tab becomes a plain window (AeroSpace).
+        if (parent.layout === "tabbed" && parent.children.length > 1) {
+            detach(node);
+            const outer = wrap(parent, splitFor(dir));
+            insertChild(outer, node, forward ? 1 : 0);
+            normalize(outer.children[forward ? 0 : 1]);
+            focusNode(node);
+            return true;
+        }
     }
     // Step out: land next to the nearest enclosing container whose parent is
     // split along dir's axis.
@@ -174,27 +191,48 @@ function moveNode(node, dir) {
     }
     if (axisOf(root) === dirAxis(dir) || root.children.length < 2) return false;
     // Nothing encloses node along dir's axis: re-orient the root to that axis,
-    // with everything else wrapped up on the far side.
+    // with everything else wrapped up on the far side. (Removing node may
+    // leave the root absorbing a container that already has that axis; a
+    // tabbed one still gets wrapped, or node would become a tab.)
     detach(node);
     normalize(parent);
-    let wrapper = null;
-    if (axisOf(root) !== dirAxis(dir)) {
-        wrapper = newContainer(root.layout);
-        wrapper.splitLayout = root.splitLayout;
-        wrapper.children = root.children;
-        wrapper.weights = root.weights;
-        wrapper.focus = root.focus;
-        wrapper.children.forEach(function (c) { c.parent = wrapper; });
-        root.layout = dirAxis(dir) === "h" ? "splith" : "splitv";
-        root.children = [];
-        root.weights = [];
-        root.focus = [];
-        insertChild(root, wrapper);
+    let content = null;
+    if (axisOf(root) !== dirAxis(dir) || root.layout === "tabbed") {
+        content = wrap(root, splitFor(dir)).children[0];
     }
     insertChild(root, node, forward ? root.children.length : 0);
-    if (wrapper) normalize(wrapper);
+    if (content) normalize(content);
     focusNode(node);
     return true;
+}
+
+// Push con's content one level down: a new container with layout takes con's
+// place and holds con as its only child. The root can't move, so it becomes
+// that outer container itself and its content moves into a new child.
+// Returns the outer container.
+function wrap(con, layout) {
+    if (con.type === "root") {
+        const inner = newContainer(con.layout);
+        inner.splitLayout = con.splitLayout;
+        inner.children = con.children;
+        inner.weights = con.weights;
+        inner.focus = con.focus;
+        inner.children.forEach(function (c) { c.parent = inner; });
+        con.layout = layout;
+        con.children = [];
+        con.weights = [];
+        con.focus = [];
+        insertChild(con, inner);
+        return con;
+    }
+    const parent = con.parent;
+    const outer = newContainer(layout);
+    parent.children[parent.children.indexOf(con)] = outer;
+    parent.focus[parent.focus.indexOf(con)] = outer;
+    outer.parent = parent;
+    con.parent = null;
+    insertChild(outer, con);
+    return outer;
 }
 
 // The leaf inside node nearest to where we enter from: along dir's axis the
@@ -225,13 +263,7 @@ function splitNode(node, layout) {
         parent.layout = layout;
         return;
     }
-    const con = newContainer(layout);
-    con.pendingSplit = true;
-    parent.children[parent.children.indexOf(node)] = con;
-    parent.focus[parent.focus.indexOf(node)] = con;
-    con.parent = parent;
-    node.parent = null;
-    insertChild(con, node);
+    wrap(node, layout).pendingSplit = true;
 }
 
 // i3 "layout toggle split" on node's container. A tabbed container goes back
@@ -273,8 +305,9 @@ function resizeNode(node, axis, delta) {
 }
 
 // Map of leaf id -> integer rect {x, y, width, height} for every leaf under
-// root, inside area shrunk by gapsOuter, with gapsInner between siblings.
-function layoutRects(root, area, gapsInner, gapsOuter) {
+// root, inside area shrunk by gapsOuter, with gapsInner between siblings and
+// tabPadding (default 0) for the slivers of tabs behind the visible one.
+function layoutRects(root, area, gapsInner, gapsOuter, tabPadding) {
     const x = Math.round(area.x + gapsOuter);
     const y = Math.round(area.y + gapsOuter);
     const rect = {
@@ -284,13 +317,13 @@ function layoutRects(root, area, gapsInner, gapsOuter) {
         height: Math.round(area.y + area.height - gapsOuter) - y
     };
     const rects = new Map();
-    place(root, rect, gapsInner, rects);
+    place(root, rect, gapsInner, tabPadding || 0, rects);
     return rects;
 }
 
 // The rect node covers in root's layout: the union of its leaves' rects.
-function nodeRect(root, node, area, gapsInner, gapsOuter) {
-    const rects = layoutRects(root, area, gapsInner, gapsOuter);
+function nodeRect(root, node, area, gapsInner, gapsOuter, tabPadding) {
+    const rects = layoutRects(root, area, gapsInner, gapsOuter, tabPadding);
     return leaves(node).map(function (l) { return rects.get(l.id); }).reduce(function (a, b) {
         const x = Math.min(a.x, b.x);
         const y = Math.min(a.y, b.y);
@@ -303,13 +336,26 @@ function nodeRect(root, node, area, gapsInner, gapsOuter) {
     });
 }
 
-function place(node, rect, gap, rects) {
+function place(node, rect, gap, pad, rects) {
     if (node.type === "leaf") {
         rects.set(node.id, rect);
         return;
     }
     if (node.layout === "tabbed") {
-        node.children.forEach(function (c) { place(c, rect, gap, rects); });
+        // Accordion (AeroSpace): the visible tab is inset by pad on each side
+        // that has tabs, and those tabs sit pad further out behind it, so a
+        // sliver of them shows. All tabs keep one size: switching only moves.
+        const horizontal = axisOf(node) === "h";
+        const shown = node.children.indexOf(node.focus[0]);
+        const before = shown > 0 ? pad : 0;
+        const after = shown < node.children.length - 1 ? pad : 0;
+        const size = (horizontal ? rect.width : rect.height) - before - after;
+        node.children.forEach(function (child, i) {
+            const offset = i < shown ? 0 : i === shown ? before : before + after;
+            place(child, horizontal
+                ? { x: rect.x + offset, y: rect.y, width: size, height: rect.height }
+                : { x: rect.x, y: rect.y + offset, width: rect.width, height: size }, gap, pad, rects);
+        });
         return;
     }
     // Edges come from the running weight total, so rounding never accumulates
@@ -324,6 +370,6 @@ function place(node, rect, gap, rects) {
         const b = start + Math.round(total * free) + i * gap;
         place(child, horizontal
             ? { x: a, y: rect.y, width: b - a, height: rect.height }
-            : { x: rect.x, y: a, width: rect.width, height: b - a }, gap, rects);
+            : { x: rect.x, y: a, width: rect.width, height: b - a }, gap, pad, rects);
     });
 }

@@ -34,7 +34,7 @@ screen and 11 named virtual desktops.
 | KDE built-ins | Reuse them | Your existing desktop, close and fullscreen bindings keep working. |
 | Mod key / directions | **Alt** + h/j/k/l | Alt is already your mod key for desktops. |
 | Decorations | Keep KDE titlebars | The active titlebar color shows which window has focus. k3 never sets `noBorder`. |
-| Tabbed / stacked | "Tabbed" means monocle with no tab bar. Stacked is dropped. | Without bars, stacked would look identical to tabbed. |
+| Tabbed / stacked | One "tabbed" layout with no tab bar, drawn as an AeroSpace-style accordion: 30px slivers of the hidden tabs show beside the visible one. Its direction comes from where it sits (left/right at the root, across its parent's direction when nested), so i3's separate "stacked" isn't needed. | Revised 2026-11-02 at your request: originally a plain monocle; see §5.5 |
 | v1 scope | Core features, plus multi-monitor and focus parent/child | Scratchpad and mouse-sync go in the backlog (§9). |
 | Workspaces | Your existing 11 named KDE desktops, which stay fixed | No dynamic create/remove, because that would fight your named desktops. |
 | Unit tests | `qmltestrunner` | It's already installed and uses the same V4 JS engine as KWin. Node is not installed. |
@@ -82,7 +82,7 @@ screen and 11 named virtual desktops.
 |---|---|---|
 | Binding modes (`mode "resize"`, custom modes) | Global shortcuts are static. A script can't grab the keyboard, and the JS API has no `unregisterShortcut`. | Direct shortcuts (Alt+Ctrl+h/j/k/l to resize) |
 | Tab/title bars, i3 borders, focus colors | Drawing them needs a QML overlay window, which is out of scope | KDE titlebars plus the monocle tabbed layout |
-| `stacking` layout | Without bars it's indistinguishable from tabbed | Dropped |
+| `stacking` layout | Without bars it's indistinguishable from tabbed | Covered by tabbed's automatic up/down direction |
 | i3 config file, `i3-msg`/IPC, command criteria | No IPC surface | KWin script config dialog plus System Settings shortcuts. Shortcuts can be fired over D-Bus (`invokeShortcut`). |
 | i3bar | Not a WM concern | Plasma panel with the Pager widget |
 | Dynamic numbered workspaces | Possible (`createDesktop`/`removeDesktop`) but clashes with your named desktops | Fixed KDE desktops |
@@ -250,8 +250,24 @@ them.
   Otherwise wrap the selected node in a new container (`pendingSplit`).
 - **layout toggle split**: flip the parent between `splith` and `splitv`.
 - **layout tabbed (toggle)**: switch the parent between `tabbed` and its
-  previous split layout. Inside a tabbed container, left/right steps through
-  the tabs.
+  previous split layout.
+- **Tabbed containers (accordion, after AeroSpace; deviates from i3):**
+  - **Direction:** a tabbed root runs left/right. A nested tabbed container
+    runs across its parent's direction, so the parent's keys keep moving
+    between its parts (`axisOf`). In `[A | tabs]`, Alt+H/L go between A and
+    the tabs, and Alt+J/K step through the tabs.
+  - **Slivers:** the visible tab (the container's `focus[0]`) is inset by
+    `tabPadding` on each side that has tabs. Earlier and later tabs sit
+    `tabPadding` further out behind it, so a sliver of them shows. All tabs
+    keep one size. k3 retiles on every activation so the slivers follow
+    focus.
+  - **Move along the direction:** reorders tabs. Past the first or last tab,
+    the tab *pops out*: the tabs' place is split along the move direction
+    (`wrap`) with the tab on that side. The remaining tabs then run the other
+    way, and a lone remaining tab becomes a plain window.
+  - **Move sideways:** steps the tab out as usual (e.g. below the tabs).
+  - **Merge back:** moving a window into a tabbed container puts it next to
+    the visible tab.
 - **floating toggle**:
   - Tiled → floating: remove from the tree and restore the geometry the
     window had when k3 first saw it. If that nearly fills the screen (≥90% in
@@ -300,6 +316,7 @@ They're hard-coded defaults until phase 5 adds the settings dialog.
 | `ignoreClasses` | `"plasmashell,krunner,ksmserver-logout-greeter,…"` | window classes k3 never touches |
 | `resizeStep` | 5 | % of the parent per resize keypress |
 | `floatAbove` | true | windows k3 floats get `keepAbove` |
+| `tabPadding` | 30 | px of each hidden tab left showing beside the visible one (0 = plain monocle) |
 
 ## 6. Keybindings
 
@@ -333,8 +350,8 @@ browser Alt+D. So the less frequent k3 commands default to **Alt+Shift+letter**.
 | Shrink width / grow height / shrink height / grow width (`k3-resize-…`) | `resize …` | Alt+Ctrl+H / J / K / L | Emacs C-M-h / C-M-k |
 | Split horizontal (`k3-split-h`) | `split h` | Alt+Shift+B ("beside") | |
 | Split vertical (`k3-split-v`) | `split v` | Alt+Shift+V | |
-| Toggle split direction (`k3-layout-toggle-split`) | `layout toggle split` | Alt+Shift+T | |
-| Toggle tabbed (`k3-layout-tabbed`) | `layout tabbed` | Alt+Shift+W | |
+| Toggle split direction (`k3-layout-toggle-split`) | `layout toggle split` | Alt+/ (AeroSpace's `alt-slash`; was Alt+Shift+T) | Emacs M-/ |
+| Toggle tabbed (`k3-layout-tabbed`) | `layout tabbed` | Alt+, (AeroSpace's `alt-comma`; was Alt+Shift+W) | Emacs M-, |
 | Toggle floating (`k3-float-toggle`) | `floating toggle` | Alt+Shift+Space | |
 | Focus tiled ↔ floating (`k3-focus-mode-toggle`) | `focus mode_toggle` | *(none)* | Alt+Space is KRunner |
 | Focus parent (`k3-focus-parent`) | `focus parent` | Alt+Shift+U ("up") | |
@@ -466,7 +483,18 @@ session and live by you)
   movement now ends the selection. (You chose this over flashing the outline
   or dimming the other windows.)
 
-**Phase 4: multi-monitor**
+**Accordion tabbed (added before phase 4, at your request)** ✅ 2026-11-02
+(verified in the nested session and live by you)
+- `tree.js`: `axisOf` derives a tabbed container's direction, the layout draws
+  the slivers, `moveNode` pops tabs out, and `wrap` is shared with
+  `splitNode` and root re-orientation. 12 new tests, 2 updated (66 tree tests).
+- `config.js`: `tabPadding`. `kwin.js` retiles on activation.
+- Verified with 4 tabs: slivers, reorder, pop out (the rest turn to up/down),
+  Alt+J/K inside the group and Alt+H/L between the window and the group, and
+  merge back. With 2 tabs, pop-out leaves a plain split. Focus changes cause
+  no geometry churn.
+
+**Phase 4: multi-monitor** ⏸ on hold until a two-monitor system is available
 - Per-output roots, focus/move across outputs at tree edges, KDE's
   *Window to Next Screen*, output hotplug (windows re-homed through
   `outputChanged`), and both per-screen desktop modes (6.7+).

@@ -69,7 +69,7 @@ function detachClient(c) {
 function retile(s) {
     if (adopting) return;
     const area = workspace.clientArea(KWin.MaximizeArea, s.output, s.desktop);
-    layoutRects(s.root, area, config.gapsInner, config.gapsOuter).forEach(function (rect, id) {
+    layoutRects(s.root, area, config.gapsInner, config.gapsOuter, config.tabPadding).forEach(function (rect, id) {
         const w = clients.get(id).window;
         // Fullscreen and maximized windows keep their slot; KDE owns their
         // geometry until they're restored.
@@ -150,7 +150,10 @@ function start() {
     // window isn't known yet, and attachClient focuses it instead.
     workspace.windowActivated.connect(guarded(function (w) {
         const c = w && clients.get(windowId(w));
-        if (c && c.key) focusNode(c.leaf);
+        if (!c || !c.key) return;
+        focusNode(c.leaf);
+        // A tabbed layout depends on which tab is focused.
+        retile(spaces.get(c.key));
     }));
     workspace.windowAdded.connect(guarded(addWindow));
     workspace.windowRemoved.connect(guarded(removeWindow));

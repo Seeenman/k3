@@ -11,7 +11,8 @@ KEYS_FILE ?= $(HOME)/.config/kglobalshortcutsrc
 # framebuffer instead of opening a window on the host desktop.
 NESTED_SOCKET := k3-nested
 NESTED_SIZE   := --width 1600 --height 900 --output-count 2
-NESTED_ENV     = DBUS_SESSION_BUS_ADDRESS='$(shell cat .dev/bus 2>/dev/null)' WAYLAND_DISPLAY=$(NESTED_SOCKET)
+# Read by the shell at each use: a nested session just started rewrites it.
+NESTED_ENV     = DBUS_SESSION_BUS_ADDRESS="$$(cat .dev/bus 2>/dev/null)" WAYLAND_DISPLAY=$(NESTED_SOCKET)
 NESTED_QDBUS   = $(NESTED_ENV) qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting
 
 .PHONY: build install uninstall enable disable reload logs check-keys test \
@@ -85,6 +86,8 @@ nested-stop:
 # "k3": Scripting.start unloads any script named after an installed plugin
 # that the (nested) config doesn't enable.
 nested-load: build
+	@# KWin creates its socket before it's on D-Bus; wait up to 10s for the latter.
+	@for i in $$(seq 50); do $(NESTED_ENV) qdbus6 org.kde.KWin /Scripting >/dev/null 2>&1 && break; sleep 0.2; done
 	-$(NESTED_QDBUS).unloadScript $(ID)-nested
 	$(NESTED_QDBUS).loadScript $(CURDIR)/$(OUT) $(ID)-nested
 	$(NESTED_QDBUS).start

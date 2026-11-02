@@ -41,7 +41,8 @@ function onTarget(fn) {
 function showSelection() {
     const s = selection.space;
     const area = workspace.clientArea(KWin.MaximizeArea, s.output, s.desktop);
-    const r = nodeRect(s.root, selection.node, area, config.gapsInner, config.gapsOuter);
+    const r = nodeRect(s.root, selection.node, area, config.gapsInner, config.gapsOuter,
+                       config.tabPadding);
     workspace.showOutline(r.x, r.y, r.width, r.height);
 }
 

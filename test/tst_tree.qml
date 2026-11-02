@@ -253,10 +253,13 @@ TestCase {
     }
 
     function test_neighbor_in_tabbed_steps_through_tabs() {
+        // Inside a left/right split the tabs run up/down, so left/right still
+        // moves between the split's parts.
         const root = build("splith", ["a", ["tabbed", "b", "c"]])
-        compare(Tree.neighbor(find(root, "b"), "right").id, "c")
-        compare(Tree.neighbor(find(root, "c"), "right"), null)
-        compare(Tree.neighbor(find(root, "b"), "left").id, "a")
+        compare(Tree.neighbor(find(root, "b"), "down").id, "c")
+        compare(Tree.neighbor(find(root, "c"), "down"), null)
+        compare(Tree.neighbor(find(root, "c"), "left").id, "a")
+        compare(Tree.neighbor(find(root, "b"), "right"), null)
     }
 
     // --- moveNode (move <dir>) --------------------------------------------------
@@ -299,10 +302,104 @@ TestCase {
         compare(shape(root), "splith(a,b,c)")
     }
 
-    function test_move_into_tabbed_makes_a_tab() {
+    function test_move_into_tabbed_makes_a_tab_next_to_the_visible_one() {
         const root = build("splith", ["a", ["tabbed", "b", "c"], "d"])
         verify(Tree.moveNode(find(root, "d"), "left"))
-        compare(shape(root), "splith(a,tabbed(b,c,d))")
+        compare(shape(root), "splith(a,tabbed(b,d,c))")
+    }
+
+    // --- tabbed (accordion) -----------------------------------------------------
+
+    function test_tab_direction_follows_parent() {
+        compare(Tree.axisOf(build("tabbed", ["a", "b"])), "h")
+        compare(Tree.axisOf(build("splith", ["a", ["tabbed", "b", "c"]]).children[1]), "v")
+        compare(Tree.axisOf(build("splitv", ["a", ["tabbed", "b", "c"]]).children[1]), "h")
+    }
+
+    function test_move_reorders_tabs() {
+        const root = build("tabbed", ["a", "b", "c"])
+        verify(Tree.moveNode(find(root, "a"), "right"))
+        compare(shape(root), "tabbed(b,a,c)")
+    }
+
+    function test_move_past_first_tab_pops_out_and_turns_the_rest() {
+        const root = build("tabbed", ["a", "b", "c"])
+        verify(Tree.moveNode(find(root, "a"), "left"))
+        compare(shape(root), "splith(a,tabbed(b,c))")
+        compare(Tree.neighbor(find(root, "b"), "down").id, "c")
+        compare(Tree.neighbor(find(root, "b"), "left").id, "a")
+        compare(Tree.focusedLeaf(root).id, "a")
+    }
+
+    function test_move_past_last_tab_pops_out_to_the_right() {
+        const root = build("tabbed", ["a", "b", "c"])
+        verify(Tree.moveNode(find(root, "c"), "right"))
+        compare(shape(root), "splith(tabbed(a,b),c)")
+    }
+
+    function test_pop_out_of_two_tabs_leaves_a_split() {
+        const root = build("tabbed", ["a", "b"])
+        verify(Tree.moveNode(find(root, "a"), "left"))
+        compare(shape(root), "splith(a,b)")
+        const other = build("tabbed", ["a", "b"])
+        verify(Tree.moveNode(find(other, "b"), "down"))
+        compare(shape(other), "splitv(a,b)")
+    }
+
+    function test_pop_out_sideways_keeps_tab_direction() {
+        const root = build("tabbed", ["a", "b", "c"])
+        verify(Tree.moveNode(find(root, "b"), "down"))
+        compare(shape(root), "splitv(tabbed(a,c),b)")
+        compare(Tree.neighbor(find(root, "a"), "right").id, "c")
+    }
+
+    function test_pop_out_of_nested_tabs_splits_their_place() {
+        const root = build("splitv", ["x", ["tabbed", "a", "b", "c"]])
+        verify(Tree.moveNode(find(root, "a"), "left"))
+        compare(shape(root), "splitv(x,splith(a,tabbed(b,c)))")
+        compare(Tree.neighbor(find(root, "b"), "down").id, "c")
+    }
+
+    function test_popped_tab_merges_back() {
+        const root = build("tabbed", ["a", "b", "c"])
+        Tree.moveNode(find(root, "a"), "left")
+        verify(Tree.moveNode(find(root, "a"), "right"))
+        compare(shape(root), "tabbed(a,b,c)")
+        compare(Tree.axisOf(root), "h")
+    }
+
+    function test_moving_beside_tabs_does_not_join_them() {
+        // Removing a leaves the root holding only the tabs; a must still end
+        // up beside them, not inside.
+        const root = build("splitv", ["a", ["tabbed", "b", "c"]])
+        verify(Tree.moveNode(find(root, "a"), "right"))
+        compare(shape(root), "splith(tabbed(b,c),a)")
+    }
+
+    function test_accordion_shows_slivers_of_other_tabs() {
+        const root = build("tabbed", ["a", "b", "c"])
+        Tree.focusNode(find(root, "b"))
+        const rects = Tree.layoutRects(root, rect(0, 0, 1000, 500), 0, 0, 30)
+        compare(rects.get("a"), rect(0, 0, 940, 500))
+        compare(rects.get("b"), rect(30, 0, 940, 500))
+        compare(rects.get("c"), rect(60, 0, 940, 500))
+    }
+
+    function test_accordion_first_tab_has_sliver_on_one_side_only() {
+        const root = build("tabbed", ["a", "b", "c"])
+        Tree.focusNode(find(root, "a"))
+        const rects = Tree.layoutRects(root, rect(0, 0, 1000, 500), 0, 0, 30)
+        compare(rects.get("a"), rect(0, 0, 970, 500))
+        compare(rects.get("b"), rect(30, 0, 970, 500))
+        compare(rects.get("c"), rect(30, 0, 970, 500))
+    }
+
+    function test_accordion_slivers_follow_tab_direction() {
+        const root = build("splith", ["x", ["tabbed", "a", "b"]])
+        Tree.focusNode(find(root, "a"))
+        const rects = Tree.layoutRects(root, rect(0, 0, 1000, 600), 0, 0, 30)
+        compare(rects.get("a"), rect(500, 0, 500, 570))
+        compare(rects.get("b"), rect(500, 30, 500, 570))
     }
 
     function test_move_steps_out_of_container() {

@@ -11,9 +11,9 @@ The goals of this project:
 
 ## Status
 
-Phase 3 (focus parent/child) is done and running live. In progress: an
-AeroSpace-style accordion for tabbed layouts. After that comes phase 4
-(multi-monitor). See [PLAN.md](PLAN.md) for the design, the i3 feature
+Phases 1–3 and the AeroSpace-style accordion for tabbed layouts are done and
+running live. Phase 4 (multi-monitor) is on hold until a two-monitor system is
+available to test on. See [PLAN.md](PLAN.md) for the design, the i3 feature
 feasibility tables and the milestones.
 
 ## How to use
@@ -43,12 +43,12 @@ immediately, and k3's code defaults never override it. Afterwards, run
 
 | Action | Default | Notes |
 |---|---|---|
-| Focus left / down / up / right | Alt+H / J / K / L | Entering a container lands on its last-focused window. In a tabbed container, left/right switch tabs. |
-| Move left / down / up / right | Alt+Shift+H / J / K / L | Swaps with a neighbor, enters a neighboring container, or steps out of the current one |
+| Focus left / down / up / right | Alt+H / J / K / L | Entering a container lands on its last-focused window. In tabs, the keys along the tabs' direction switch tabs. |
+| Move left / down / up / right | Alt+Shift+H / J / K / L | Swaps with a neighbor, enters a neighboring container, or steps out of the current one. In tabs, reorders them; past the first or last tab, the tab pops out. |
 | Shrink width / grow height / shrink height / grow width | Ctrl+Alt+H / J / K / L | `resizeStep` % of the parent per press |
 | Split horizontal / vertical | Alt+Shift+B / Alt+Shift+V | The next window opens beside / below the focused one |
-| Toggle split direction | Alt+Shift+T | Flips the focused window's container |
-| Toggle tabbed | Alt+Shift+W | Tabbed has no tab bar: the focused tab covers the others |
+| Toggle split direction | Alt+/ | Flips the focused window's container between row and column; turns tabs back into a split |
+| Toggle tabbed | Alt+, | An accordion with no tab bar: slivers of the hidden tabs show beside the visible one (see below) |
 | Toggle floating | Alt+Shift+Space | A floated window stays above the tiled ones (`floatAbove`) |
 | Focus parent / child | Alt+Shift+U / Alt+Shift+D | Selects the container around the focused window, one level up per press. Move, split, layout, resize and focus then act on the whole container, which is shown with KWin's translucent outline. Any focus change or mouse movement ends the selection. |
 | Focus tiled ↔ floating | *(none)* | |
@@ -57,6 +57,18 @@ immediately, and k3's code defaults never override it. Afterwards, run
 The rest of i3's keys are KDE's own actions, which k3 follows: switch to or
 move to desktop N, fullscreen, close, keep on all desktops, and switch to or
 move to the next screen.
+
+**Tabbed layout (accordion).** This follows AeroSpace's accordion rather
+than i3's tabbed layout.
+- **Direction:** whole-screen tabs run left/right (Alt+H/L). Tabs next to
+  another window run the other way, so with `[A | tabs]` Alt+H/L go between
+  A and the tabs while Alt+J/K step through the tabs. The 30px slivers
+  (`tabPadding`) point the same way.
+- **Pop out:** Alt+Shift+H/L reorder tabs. Past the first or last tab, the
+  tab pops out beside the others (from 3+ tabs the rest turn to up/down;
+  from 2, you get a plain split).
+- **Merge back:** moving the popped-out window back toward the tabs puts it
+  in again.
 
 **Before enabling k3, unbind the KDE actions that use the same keys.** KDE
 doesn't refuse a duplicate: both actions get the key, and which one fires is
@@ -77,6 +89,7 @@ are comma-separated and matched against a window's class or name:
 kwriteconfig6 --file kwinrc --group Script-k3 --key gapsInner 8      # px between windows (default 4)
 kwriteconfig6 --file kwinrc --group Script-k3 --key gapsOuter 8      # px at screen edges (default 4)
 kwriteconfig6 --file kwinrc --group Script-k3 --key resizeStep 10    # % of the parent per resize press (default 5)
+kwriteconfig6 --file kwinrc --group Script-k3 --key tabPadding 20    # px of hidden tabs showing (default 30, 0 = none)
 kwriteconfig6 --file kwinrc --group Script-k3 --key floatAbove false # don't keep floated windows above (default true)
 kwriteconfig6 --file kwinrc --group Script-k3 --key floatClasses "org.kde.spectacle,steam"
 kwriteconfig6 --file kwinrc --group Script-k3 --key ignoreClasses "plasmashell,krunner"
@@ -126,6 +139,12 @@ make nested-stop
     stacked is dropped.
   - v1 scope: core features, plus multi-monitor and focus parent/child.
     Scratchpad and mouse sync are in the backlog.
+- **2026-11-02: tabbed becomes an AeroSpace-style accordion.**
+  - Slivers of the hidden tabs show beside the visible one.
+  - The tabs' direction follows their position (across the parent's
+    direction), so it covers what i3's "stacked" was for.
+  - Moving past the first or last tab pops it out; moving it back merges it.
+  - This deliberately departs from i3's tabbed layout.
 
 ### Environment (dev machine)
 
@@ -272,6 +291,21 @@ Focus and geometry:
   modifier order (`Ctrl+Alt+H`, not `Alt+Ctrl+H`). `make check-keys` parses
   `kglobalshortcutsrc`: keys are joined by a literal `\t`, and an escaped
   comma is `\\,`.
+
+### Accordion findings (2026-11-02)
+
+- **The nested KWin is on D-Bus only after its Wayland socket appears.**
+  Scripts that wait for the socket and then call D-Bus race it, so
+  `make nested-load` now waits until `org.kde.KWin` answers (up to 10s).
+- **Retiling on every activation is cheap.** k3 only sets geometry that
+  changed, and focus switches outside tabs cause zero geometry changes.
+- **New default keys don't reach existing installs.** A script shortcut is
+  stored as `k3-x=<key>,none,…`, with no default recorded, so the stored key
+  always wins over a changed default in the code. To pick up a new default,
+  rebind it in System Settings, or `unregister` the id over D-Bus and reload.
+- **Make expands `$(shell …)` before a recipe runs.** A recipe that waits for
+  a file another process rewrites has to read it in the shell (`$$(cat …)`).
+  Otherwise it keeps polling the old value.
 
 ### Phase 3 findings (2026-11-02)
 
