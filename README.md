@@ -12,8 +12,8 @@ The goals of this project:
 ## Status
 
 Phases 1–3 and the AeroSpace-style accordion for tabbed layouts are done and
-running live. Phase 4 (multi-monitor) is on hold until a two-monitor system is
-available to test on. See [PLAN.md](PLAN.md) for the design, the i3 feature
+running live. Phase 4 (multi-monitor) is built and verified on the nested
+session's two virtual screens; it still needs a check on real monitors. See [PLAN.md](PLAN.md) for the design, the i3 feature
 feasibility tables and the milestones.
 
 ## How to use
@@ -43,8 +43,8 @@ immediately, and k3's code defaults never override it. Afterwards, run
 
 | Action | Default | Notes |
 |---|---|---|
-| Focus left / down / up / right | Alt+H / J / K / L | Entering a container lands on its last-focused window. In tabs, the keys along the tabs' direction switch tabs. |
-| Move left / down / up / right | Alt+Shift+H / J / K / L | Swaps with a neighbor, enters a neighboring container, or steps out of the current one. In tabs, reorders them; past the first or last tab, the tab pops out. |
+| Focus left / down / up / right | Alt+H / J / K / L | Entering a container lands on its last-focused window. In tabs, the keys along the tabs' direction switch tabs. At the edge of a screen, focus continues onto the next screen, including an empty one. |
+| Move left / down / up / right | Alt+Shift+H / J / K / L | Swaps with a neighbor, enters a neighboring container, or steps out of the current one. In tabs, reorders them; past the first or last tab, the tab pops out. At the edge of a screen, the window moves to the next screen. |
 | Shrink width / grow height / shrink height / grow width | Ctrl+Alt+H / J / K / L | `resizeStep` % of the parent per press |
 | Split horizontal / vertical | Alt+Shift+B / Alt+Shift+V | The next window opens beside / below the focused one |
 | Toggle split direction | Alt+/ | Flips the focused window's container between row and column; turns tabs back into a split |
@@ -291,6 +291,35 @@ Focus and geometry:
   modifier order (`Ctrl+Alt+H`, not `Alt+Ctrl+H`). `make check-keys` parses
   `kglobalshortcutsrc`: keys are joined by a literal `\t`, and an escaped
   comma is `\\,`.
+
+### Phase 4 findings (2026-11-02)
+
+Geometry:
+- **A geometry read can match while an older request is still pending.** In
+  one step a window moved screen (k3 asked for slot A) and then desktop (k3
+  asked for slot B). It still read as being at B, its original spot, so k3
+  skipped B, and then A landed. k3 now also remembers what it last
+  requested (`lastRect`) and only skips a window that's in place *and*
+  wasn't asked to go elsewhere. Idle churn is still zero.
+
+Screens:
+- **Focus lingers on a screen you've left.** When KWin switches to an empty
+  screen (`slotSwitchTo*Screen`), the last window stays active on the other
+  screen. Activating an already active window does nothing, so coming back
+  needs the slot too.
+- **Output names in the nested session:** Virtual-0 and Virtual-1, side by
+  side. `kscreen-doctor output.Virtual-1.disable` / `.enable` simulates an
+  unplug and replug. KWin moves the windows off and, on replug, back again.
+- **Per-screen desktops:** the config is `[Windows] PerOutputVirtualDesktops`
+  in kwinrc, and `options.perOutputVirtualDesktops` in scripts. In that mode
+  "Switch to Desktop N" only switches the active screen.
+
+Desktops:
+- **The nested config used to persist between sessions.** Desktops created
+  in one test (including duplicate names like two "Desktop 2"s) were still
+  there in the next, which made a test's desktop names misleading.
+  `make nested` now empties `.dev/config` on every start. k3 itself keys
+  spaces by desktop id, never by name.
 
 ### Accordion findings (2026-11-02)
 

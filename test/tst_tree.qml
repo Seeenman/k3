@@ -556,6 +556,28 @@ TestCase {
         compare(Tree.nodeRect(root, find(root, "b"), area, 10, 0), rect(505, 0, 495, 295))
     }
 
+    // --- screens ----------------------------------------------------------------
+
+    function test_nearest_screen_side_by_side() {
+        const screens = [rect(0, 0, 1600, 900), rect(1600, 0, 1600, 900)]
+        compare(Tree.nearestInDirection(screens[0], screens, "right"), 1)
+        compare(Tree.nearestInDirection(screens[1], screens, "left"), 0)
+        compare(Tree.nearestInDirection(screens[0], screens, "left"), -1)
+        compare(Tree.nearestInDirection(screens[0], screens, "down"), -1)
+    }
+
+    function test_nearest_screen_picks_closest_and_ignores_diagonal() {
+        // A laptop below the left half of two side-by-side monitors, plus one
+        // monitor off to the far right with a gap and different height.
+        const screens = [rect(0, 0, 1920, 1080), rect(1920, 0, 1920, 1080),
+                         rect(400, 1080, 1280, 800), rect(5000, 200, 1280, 1024)]
+        compare(Tree.nearestInDirection(screens[0], screens, "down"), 2)
+        compare(Tree.nearestInDirection(screens[1], screens, "down"), -1)
+        compare(Tree.nearestInDirection(screens[2], screens, "up"), 0)
+        compare(Tree.nearestInDirection(screens[0], screens, "right"), 1)
+        compare(Tree.nearestInDirection(screens[1], screens, "right"), 3)
+    }
+
     function test_resize_skips_tabbed_and_reports_missing_axis() {
         const root = build("splith", ["a", ["tabbed", "b", "c"]])
         verify(Tree.resizeNode(find(root, "b"), "h", 0.1))

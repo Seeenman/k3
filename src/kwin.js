@@ -2,7 +2,9 @@
 // (output, desktop) in sync with window events, and applies the layout.
 // See PLAN.md §5.3-5.4.
 
-const spaces = new Map();   // spaceKey -> { root, output, desktop }
+// A space keeps the output's name and the desktop's id, not the objects: KWin
+// replaces an output's object when the monitor is replugged.
+const spaces = new Map();   // spaceKey -> { root, outputName, desktopId }
 const clients = new Map();  // window id -> { window, floating, leaf, key }
 let adopting = false;       // true while start() adopts existing windows
 
@@ -46,7 +48,8 @@ function sync(c) {
 function attachClient(c, key) {
     let s = spaces.get(key);
     if (!s) {
-        s = { root: newRoot("splith"), output: c.window.output, desktop: c.window.desktops[0] };
+        s = { root: newRoot("splith"), outputName: c.window.output.name,
+              desktopId: c.window.desktops[0].id };
         spaces.set(key, s);
     }
     // i3: a new window goes right after the focused one.
@@ -66,19 +69,35 @@ function detachClient(c) {
     c.key = null;
 }
 
+// The space's usable screen area, or null while its output or desktop is gone
+// (its windows are then on their way elsewhere).
+function spaceArea(s) {
+    const output = workspace.screens.find(function (o) { return o.name === s.outputName; });
+    const desktop = workspace.desktops.find(function (d) { return d.id === s.desktopId; });
+    return output && desktop ? workspace.clientArea(KWin.MaximizeArea, output, desktop) : null;
+}
+
 function retile(s) {
-    if (adopting) return;
-    const area = workspace.clientArea(KWin.MaximizeArea, s.output, s.desktop);
+    const area = spaceArea(s);
+    if (adopting || !area) return;
     layoutRects(s.root, area, config.gapsInner, config.gapsOuter, config.tabPadding).forEach(function (rect, id) {
-        const w = clients.get(id).window;
+        const c = clients.get(id);
+        const w = c.window;
         // Fullscreen and maximized windows keep their slot; KDE owns their
         // geometry until they're restored.
         if (w.fullScreen || w.maximizeMode !== 0) return;
-        // KWin reports fractional geometry; anything within a pixel is done.
+        // Skip only a window that's in place (KWin reports fractional
+        // geometry; within a pixel is in place) and has no other request of
+        // k3's pending: geometry lags behind requests, so a window can still
+        // read as being at rect while an older request elsewhere is on its way.
         const g = w.frameGeometry;
-        if (Math.abs(g.x - rect.x) >= 1 || Math.abs(g.y - rect.y) >= 1
-            || Math.abs(g.width - rect.width) >= 1 || Math.abs(g.height - rect.height) >= 1)
-            w.frameGeometry = rect;
+        const inPlace = Math.abs(g.x - rect.x) < 1 && Math.abs(g.y - rect.y) < 1
+            && Math.abs(g.width - rect.width) < 1 && Math.abs(g.height - rect.height) < 1;
+        const requested = c.lastRect && c.lastRect.x === rect.x && c.lastRect.y === rect.y
+            && c.lastRect.width === rect.width && c.lastRect.height === rect.height;
+        if (inPlace && requested) return;
+        c.lastRect = rect;
+        w.frameGeometry = rect;
     });
 }
 
@@ -99,8 +118,9 @@ function addWindow(w) {
     log(kind, w.resourceClass);
     // floatRect: where the window goes if it's floated (its pre-tiling place).
     // keptAbove: k3 set keepAbove when floating it.
+    // lastRect: the geometry k3 last requested for it (see retile).
     const c = { window: w, floating: kind === "float", leaf: newLeaf(windowId(w)), key: null,
-                floatRect: copyRect(w.frameGeometry), keptAbove: false };
+                floatRect: copyRect(w.frameGeometry), keptAbove: false, lastRect: null };
     clients.set(windowId(w), c);
     if (!c.floating) claim(w);
     const onSync = guarded(function () { sync(c); });

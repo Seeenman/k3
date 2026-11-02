@@ -40,7 +40,11 @@ function onTarget(fn) {
 // i3 highlights the focused container's border; k3 uses KWin's outline.
 function showSelection() {
     const s = selection.space;
-    const area = workspace.clientArea(KWin.MaximizeArea, s.output, s.desktop);
+    const area = spaceArea(s);
+    if (!area) {
+        clearSelection();
+        return;
+    }
     const r = nodeRect(s.root, selection.node, area, config.gapsInner, config.gapsOuter,
                        config.tabPadding);
     workspace.showOutline(r.x, r.y, r.width, r.height);
@@ -70,17 +74,75 @@ function focusChild() {
     });
 }
 
+// At the edge of a screen's layout, focus continues onto the next screen.
+// A focused floating window has nothing tiled to walk from.
 function focusDirection(dir) {
+    const c = activeClient();
+    // Focusing an empty screen leaves the last window active elsewhere: walk
+    // from the screen the user is on.
+    if (c && c.window.output.name !== workspace.activeScreen.name) {
+        focusScreen(workspace.activeScreen, dir);
+        return;
+    }
+    if (c && !c.key) return;
+    let done = false;
     onTarget(function (node) {
         const target = neighbor(node, dir);
-        if (target) activate(focusedLeaf(target));
+        if (target) {
+            activate(focusedLeaf(target));
+            done = true;
+        }
     });
+    if (!done) focusScreen(c ? c.window.output : workspace.activeScreen, dir);
 }
 
+// At the edge of a screen's layout, the window continues onto the next
+// screen. A selected container stays put.
 function moveDirection(dir) {
+    let done = false;
     onTarget(function (node, s) {
-        if (moveNode(node, dir)) retile(s);
+        if (moveNode(node, dir)) {
+            retile(s);
+            done = true;
+        }
     });
+    if (!done && !selection) moveToScreen(dir);
+}
+
+// The screen next to output in direction dir, or null.
+function screenInDirection(output, dir) {
+    const screens = workspace.screens;
+    const i = nearestInDirection(output.geometry, screens.map(function (o) { return o.geometry; }), dir);
+    return i >= 0 ? screens[i] : null;
+}
+
+// Focus the screen next to output: its last focused tiled window. When it has
+// none, or that window is already active (we're coming back from an empty
+// screen), activating does nothing, so move KWin's active screen instead.
+function focusScreen(output, dir) {
+    const next = screenInDirection(output, dir);
+    if (!next) return;
+    const s = spaces.get(spaceKey(next, workspace.currentDesktopForScreen(next)));
+    const leaf = s && focusedLeaf(s.root);
+    if (leaf && !clients.get(leaf.id).window.active) {
+        activate(leaf);
+        return;
+    }
+    const slot = { left: "slotSwitchToLeftScreen", right: "slotSwitchToRightScreen",
+                   up: "slotSwitchToAboveScreen", down: "slotSwitchToBelowScreen" }[dir];
+    workspace[slot]();
+}
+
+// Send the active tiled window to the screen next to it, onto the desktop
+// that screen shows (they differ with per-screen desktops); sync() then
+// tiles it there after that screen's focused window.
+function moveToScreen(dir) {
+    const c = activeTiled();
+    const next = c && screenInDirection(c.window.output, dir);
+    if (!next) return;
+    workspace.sendClientToScreen(c.window, next);
+    const desktop = workspace.currentDesktopForScreen(next);
+    if (c.window.desktops[0].id !== desktop.id) c.window.desktops = [desktop];
 }
 
 // Splitting changes no geometry until the next window opens.

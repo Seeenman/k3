@@ -304,6 +304,32 @@ function resizeNode(node, axis, delta) {
     return true;
 }
 
+// --- screens ----------------------------------------------------------------
+
+// Index of the rect in candidates nearest to from in direction dir: wholly on
+// that side and overlapping it across dir's axis (screens side by side, not
+// diagonal). -1 if there is none.
+function nearestInDirection(from, candidates, dir) {
+    let best = -1;
+    let bestGap = Infinity;
+    candidates.forEach(function (r, i) {
+        const gap = dir === "left" ? from.x - (r.x + r.width)
+                  : dir === "right" ? r.x - (from.x + from.width)
+                  : dir === "up" ? from.y - (r.y + r.height)
+                  : r.y - (from.y + from.height);
+        const overlaps = dirAxis(dir) === "h"
+            ? r.y < from.y + from.height && from.y < r.y + r.height
+            : r.x < from.x + from.width && from.x < r.x + r.width;
+        if (gap >= 0 && overlaps && gap < bestGap) {
+            best = i;
+            bestGap = gap;
+        }
+    });
+    return best;
+}
+
+// --- layout -----------------------------------------------------------------
+
 // Map of leaf id -> integer rect {x, y, width, height} for every leaf under
 // root, inside area shrunk by gapsOuter, with gapsInner between siblings and
 // tabPadding (default 0) for the slivers of tabs behind the visible one.

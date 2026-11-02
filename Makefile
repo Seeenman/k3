@@ -71,9 +71,10 @@ test:
 
 # --- nested KWin ------------------------------------------------------------
 
-# Isolated config (.dev/config) and D-Bus session; kwin output -> .dev/nested.log
+# Isolated config (.dev/config, emptied each time so tests start from KDE's
+# defaults) and D-Bus session; kwin output -> .dev/nested.log
 nested: build
-	@mkdir -p .dev/config
+	@rm -rf .dev/config && mkdir -p .dev/config
 	-XDG_CONFIG_HOME=$(CURDIR)/.dev/config QT_FORCE_STDERR_LOGGING=1 \
 	  dbus-run-session -- sh -c 'echo "$$DBUS_SESSION_BUS_ADDRESS" > .dev/bus; \
 	  exec kwin_wayland --socket $(NESTED_SOCKET) --xwayland --no-lockscreen \

@@ -199,8 +199,12 @@ reachable through the qualifier (`test/tst_engine.qml` guards this).
 | `w.interactiveMoveResizeFinished` | Retile so the window snaps back. Mouse sync is in the backlog. |
 | `workspace.currentDesktopChanged`, `screensChanged`, `virtualScreenGeometryChanged` | Retile the visible roots |
 
-**Applying geometry**: k3 only sets `frameGeometry` when it differs from the
-current geometry by at least a pixel. k3 doesn't listen to
+**Applying geometry**: k3 skips a window only if it's within a pixel of its
+target *and* the target is what k3 last requested for it (`lastRect`).
+Otherwise it sets `frameGeometry`. Reads lag behind requests, so a window can
+read as being at its new target while an older request is still on its way;
+that request would then win. Phase 4 hit this when a window moved screen and
+desktop in one step. k3 doesn't listen to
 `frameGeometryChanged` at all, so it can't feed back on its own changes and
 needs no re-entrancy guard. On Wayland, resizing is asynchronous
 (configure/ack), so k3 never reads geometry back to make layout decisions;
@@ -232,8 +236,15 @@ them.
 - **focus ⟨dir⟩**: walk up from the selected node until reaching a parent whose
   axis matches the direction (`splith` or `tabbed` for left/right, `splitv` for
   up/down) and that has a sibling in that direction. Then walk down that
-  sibling's focus stack to a leaf and activate it. At the root, try the
-  neighboring output (phase 4). Otherwise do nothing.
+  sibling's focus stack to a leaf and activate it.
+  - **Edge of the screen's layout:** go to the screen next to it in that
+    direction (`nearestInDirection` on the screen geometries) and activate
+    its last-focused tiled window.
+  - **Empty target screen,** or a target window that's already active:
+    move KWin's active screen with `slotSwitchTo{Left,Right,Above,Below}Screen`.
+  - **The user is on an empty screen** while a window elsewhere is still
+    active (KWin leaves it active): walk from the active screen instead.
+  - **A floating window is focused:** do nothing.
 - **move ⟨dir⟩**:
   - If the sibling in that direction (in a parent on the matching axis) is a
     leaf, swap with it.
@@ -244,8 +255,12 @@ them.
   - If there's no sibling in that direction, move out: go to the nearest
     ancestor on the matching axis and insert beside it.
   - At the root, if the root's axis doesn't match, wrap the root's children in
-    a new container and re-orient the root. If it does match, move to the
-    neighboring output (phase 4).
+    a new container and re-orient the root.
+  - If it does match (or it's the only window), send the window to the screen
+    next to it (`sendClientToScreen`). Then put it on the desktop that screen
+    shows, since that can differ with per-screen desktops. `sync()` inserts
+    it after that screen's focused window.
+  - A selected container doesn't cross screens; it stops at the edge.
 - **split h / split v**: if the parent has one child, just change its layout.
   Otherwise wrap the selected node in a new container (`pendingSplit`).
 - **layout toggle split**: flip the parent between `splith` and `splitv`.
@@ -494,13 +509,29 @@ session and live by you)
   merge back. With 2 tabs, pop-out leaves a plain split. Focus changes cause
   no geometry churn.
 
-**Phase 4: multi-monitor** ⏸ on hold until a two-monitor system is available
-- Per-output roots, focus/move across outputs at tree edges, KDE's
-  *Window to Next Screen*, output hotplug (windows re-homed through
-  `outputChanged`), and both per-screen desktop modes (6.7+).
-- Tested with `make nested` using two outputs.
+**Phase 4: multi-monitor** ✅ built 2026-11-02 and verified on the nested
+session's two virtual screens; the real two-monitor check is still to do
+- Per-output roots (since phase 1), now with focus/move across screens at the
+  layout's edges, KDE's *Window to Next Screen*, hotplug, and both
+  per-screen desktop modes.
+- Spaces store the output's name and the desktop's id and look the objects up
+  when needed (`spaceArea`), since KWin replaces output objects on replug.
+- `nearestInDirection` (2 new tests, 68 tree tests in all) and the
+  `lastRect` fix in `retile`.
 - **Done when** focus and move by direction cross monitors naturally, and
   unplugging a monitor leaves every window tiled on the remaining one.
+  ✅ Verified on virtual screens:
+  - focus across screens, both onto an empty screen and back from one;
+  - moving across screens in both directions;
+  - KDE's *Window to Next Screen*;
+  - disabling and re-enabling a screen with `kscreen-doctor` (its windows
+    re-tile on the other screen and then return);
+  - per-screen desktops: a moved window lands on the desktop the target
+    screen shows.
+- **Still open:**
+  - real monitors (different sizes and scaling, panels, a true unplug);
+  - a re-homed window's left-to-right order isn't preserved on unplug;
+  - should a selected container cross screens?
 
 **Phase 5: settings and polish**
 - `contents/config/main.xml` and `contents/ui/config.ui` for the §5.6 keys
