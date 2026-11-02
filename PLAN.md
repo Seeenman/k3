@@ -69,7 +69,7 @@ screen and 11 named virtual desktops.
 |---|---|
 | Multi-monitor: tree per screen, focus/move across screens | Find the neighboring output from output geometry. Uses `workspace.sendClientToScreen`, `outputChanged`, and output hotplug. |
 | Per-screen workspaces (i3: each workspace lives on one output) | Plasma 6.7+ has an opt-in setting, *Switch desktops independently for each screen* (Wayland only). The set of desktops is still shared across screens. k3 calls `workspace.currentDesktopForScreen(output)`, so it works with the setting on or off. |
-| Showing which container is selected (focus parent) | `workspace.showOutline(rect)` / `hideOutline()`. Phase 0: it persists until hidden, but in the nested session it's an **opaque gray fill** that hides window content. Check the live (Plasma-themed) look in phase 3. If it's still opaque, fall back to an OSD hint. |
+| Showing which container is selected (focus parent) | `workspace.showOutline(x, y, w, h)` / `hideOutline()`. It persists until hidden and animates when given a new rect. Phase 0 saw an opaque gray fill. In phase 3 it drew as KWin's translucent quick-tile preview (Plasma's `widgets/translucentbackground`), washing over the selected container. Live it looks fine, but it **swallows mouse clicks**. So any pointer movement (`workspace.cursorPosChanged`) ends the selection and hides the outline, and the click goes through. |
 | Focusing an empty screen | KWin focus is per window, but `workspace.slotSwitchToLeftScreen` / `…Right…` / `…Above…` / `…Below…` exist (confirmed in phase 0), so k3 can move the active screen even when it has no windows |
 | Window lifecycle edge cases | Apps that open maximized, min-size limits bigger than their tile, Wayland apps that set `app_id` late, transients that turn into normal windows |
 | Dragging a tiled window with the mouse | v1: the window snaps back on `interactiveMoveResizeFinished`. Drop-to-reposition and mouse resize that updates ratios go in the backlog. |
@@ -268,10 +268,18 @@ them.
   nearest ancestor on the matching axis where the node has a sibling. Move
   `resizeStep` (default 5%) of weight between the node and its next sibling, or
   its previous sibling if it's last. Weights are clamped to at least 5%.
-- **focus parent / focus child**: move the selection up one level, or down
-  along the focus stack. While the selection is a container, show it with
-  `workspace.showOutline(rect)`. Hide the outline when the selection returns to
-  a leaf, or on any external activation.
+- **focus parent / focus child**: move the selection up one level (stopping
+  below the root), or back down along the focus stack. Down to a leaf means
+  no selection. There is one global `selection` ({ node, space }). Any window
+  activation clears it (k3's own focus moves, clicks, Alt+Tab), and so do a
+  desktop switch and any mouse movement (the outline swallows clicks, so
+  reaching for the mouse ends the selection). While it's set:
+  - move, split, layout toggles, resize and directional focus act on the
+    selected container;
+  - KWin's outline covers it (`nodeRect`: the union of its leaves' rects), and
+    it's re-shown after every command so it follows the container.
+
+  A command that dissolves the container clears the selection.
 - **retile** (recovery): re-run `sync()` for every window, then re-apply the
   visible layouts.
 
@@ -441,10 +449,22 @@ then loaded live by you)
   building `[A | [B / C]]`, every focus direction, five kinds of move, resize,
   tabbed on/off, float/unfloat, and focus mode toggle.
 
-**Phase 3: focus parent/child**
-- Selection pointer, outline indicator, and move/split/layout/resize acting on
-  the selected container.
+**Phase 3: focus parent/child** ✅ done 2026-11-02 (verified in the nested
+session and live by you)
+- `commands.js`: the global selection, `onTarget()` (every tree command acts on
+  the selection or the active leaf), outline indicator, `focusParent` and
+  `focusChild` on Alt+Shift+U / Alt+Shift+D.
+- `tree.js`: `nodeRect`, plus 5 tests for container targets (54 tree tests).
 - **Done when** selecting `[B / C]` and moving it left swaps it as a unit with A.
+  ✅ Also verified:
+  - focus child hides the outline;
+  - focus up from the container is a no-op and focus right leaves it;
+  - toggle split and grow height act on the container;
+  - a desktop switch clears the selection;
+  - no errors were logged.
+- Live check by you: the outline looks fine but swallowed clicks. Fixed: mouse
+  movement now ends the selection. (You chose this over flashing the outline
+  or dimming the other windows.)
 
 **Phase 4: multi-monitor**
 - Per-output roots, focus/move across outputs at tree edges, KDE's
@@ -489,8 +509,11 @@ Easiest first:
   (decide in phase 1).
 - **Script reload loses the layout.** Trees are rebuilt as a flat `splith` row.
   This is acceptable for v1, because the JS API can't persist state.
-- **Selection indicator.** If the live outline is as opaque as in the nested
-  session, focus parent/child needs a different indicator (phase 3).
+- **Selection vs. touchpad.** Since any pointer movement ends a selection, a
+  stray touchpad touch while selecting with the keyboard ends it too.
+  Fallbacks if that's annoying: flash the outline with a `QTimer` (available
+  in KWin scripts), or dim the windows outside the selection (`window.opacity`
+  is writable).
 - **Stale shortcut entries.** Removing a registered shortcut id (e.g.
   `k3-hello` in phase 1) leaves a stale line in `kglobalshortcutsrc`. Clean it
   up with the `org.kde.KGlobalAccel.unregister("kwin", "<id>")` D-Bus call.

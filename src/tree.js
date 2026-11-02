@@ -288,6 +288,21 @@ function layoutRects(root, area, gapsInner, gapsOuter) {
     return rects;
 }
 
+// The rect node covers in root's layout: the union of its leaves' rects.
+function nodeRect(root, node, area, gapsInner, gapsOuter) {
+    const rects = layoutRects(root, area, gapsInner, gapsOuter);
+    return leaves(node).map(function (l) { return rects.get(l.id); }).reduce(function (a, b) {
+        const x = Math.min(a.x, b.x);
+        const y = Math.min(a.y, b.y);
+        return {
+            x: x,
+            y: y,
+            width: Math.max(a.x + a.width, b.x + b.width) - x,
+            height: Math.max(a.y + a.height, b.y + b.height) - y
+        };
+    });
+}
+
 function place(node, rect, gap, rects) {
     if (node.type === "leaf") {
         rects.set(node.id, rect);

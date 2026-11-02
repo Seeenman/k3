@@ -11,9 +11,9 @@ The goals of this project:
 
 ## Status
 
-Phase 2 (the i3 commands and their shortcuts) is done. It was verified in the
-nested session and is running live. Next up is phase 3 (focus
-parent/child). See [PLAN.md](PLAN.md) for the design, the i3 feature
+Phase 3 (focus parent/child) is done and running live. In progress: an
+AeroSpace-style accordion for tabbed layouts. After that comes phase 4
+(multi-monitor). See [PLAN.md](PLAN.md) for the design, the i3 feature
 feasibility tables and the milestones.
 
 ## How to use
@@ -50,6 +50,7 @@ immediately, and k3's code defaults never override it. Afterwards, run
 | Toggle split direction | Alt+Shift+T | Flips the focused window's container |
 | Toggle tabbed | Alt+Shift+W | Tabbed has no tab bar: the focused tab covers the others |
 | Toggle floating | Alt+Shift+Space | A floated window stays above the tiled ones (`floatAbove`) |
+| Focus parent / child | Alt+Shift+U / Alt+Shift+D | Selects the container around the focused window, one level up per press. Move, split, layout, resize and focus then act on the whole container, which is shown with KWin's translucent outline. Any focus change or mouse movement ends the selection. |
 | Focus tiled ↔ floating | *(none)* | |
 | Retile | *(none)* | Recovery: re-checks every window and re-applies the layouts |
 
@@ -271,6 +272,25 @@ Focus and geometry:
   modifier order (`Ctrl+Alt+H`, not `Alt+Ctrl+H`). `make check-keys` parses
   `kglobalshortcutsrc`: keys are joined by a literal `\t`, and an escaped
   comma is `\\,`.
+
+### Phase 3 findings (2026-11-02)
+
+- **The outline is KWin's quick-tile preview.**
+  `/usr/share/kwin/outline/plasma/outline.qml` draws Plasma's
+  `widgets/translucentbackground` frame. It animates when `showOutline` is
+  called again with a new rect, so it can follow a container as it moves.
+- **It's translucent.** In the nested session it washes over the selected
+  container rather than hiding it; the opaque gray seen in phase 0 didn't
+  recur. There's only one outline in KWin, so k3 keeps a single global
+  selection.
+- **The outline swallows clicks** (checked live). It's an input-grabbing
+  window that a script can't make click-through. k3 therefore ends the
+  selection on `workspace.cursorPosChanged`. KWin doesn't emit that signal
+  when windows move under a still pointer, so keyboard use keeps the
+  selection.
+- **KWin scripts have `QTimer`** (`new QTimer()`, with `interval`,
+  `singleShot`, `timeout`, `start()`), but no `setTimeout`. `window.opacity`
+  is writable.
 
 
 ### References

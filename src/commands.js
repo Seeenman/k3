@@ -1,6 +1,10 @@
-// The i3 commands behind k3's shortcuts. They act on the active window, using
-// the tree operations from tree.js and the window state from kwin.js.
-// See PLAN.md §5.5.
+// The i3 commands behind k3's shortcuts. They act on the active window, or
+// on the container picked with focus parent, using the tree operations from
+// tree.js and the window state from kwin.js. See PLAN.md §5.5.
+
+// The container picked with focus parent, as { node, space }; null when the
+// commands act on the active window itself. Any activation clears it.
+let selection = null;
 
 // The active window's client, or null if k3 doesn't manage it.
 function activeClient() {
@@ -18,44 +22,92 @@ function activate(leaf) {
     workspace.activeWindow = clients.get(leaf.id).window;
 }
 
-function focusDirection(dir) {
+// Run fn(node, space) on what the commands act on: the selected container,
+// or else the active window's leaf. Nothing happens unless the active window
+// is tiled. Afterwards the outline follows the selection, which a tree change
+// may also have dissolved.
+function onTarget(fn) {
     const c = activeTiled();
-    const target = c && neighbor(c.leaf, dir);
-    if (target) activate(focusedLeaf(target));
+    if (!c) return;
+    const s = spaces.get(c.key);
+    if (selection && (selection.space !== s || rootOf(selection.node) !== s.root)) clearSelection();
+    fn(selection ? selection.node : c.leaf, s);
+    if (!selection) return;
+    if (rootOf(selection.node) === s.root) showSelection();
+    else clearSelection();
+}
+
+// i3 highlights the focused container's border; k3 uses KWin's outline.
+function showSelection() {
+    const s = selection.space;
+    const area = workspace.clientArea(KWin.MaximizeArea, s.output, s.desktop);
+    const r = nodeRect(s.root, selection.node, area, config.gapsInner, config.gapsOuter);
+    workspace.showOutline(r.x, r.y, r.width, r.height);
+}
+
+function clearSelection() {
+    if (!selection) return;
+    selection = null;
+    workspace.hideOutline();
+}
+
+// i3 "focus parent": select the container around the active window, one level
+// further up each time, stopping below the root.
+function focusParent() {
+    onTarget(function (node, s) {
+        if (node.parent.type === "root") return;
+        selection = { node: node.parent, space: s };
+    });
+}
+
+// i3 "focus child": step the selection back down towards the active window.
+function focusChild() {
+    onTarget(function (node) {
+        if (!selection) return;
+        if (node.focus[0].type === "leaf") clearSelection();
+        else selection.node = node.focus[0];
+    });
+}
+
+function focusDirection(dir) {
+    onTarget(function (node) {
+        const target = neighbor(node, dir);
+        if (target) activate(focusedLeaf(target));
+    });
 }
 
 function moveDirection(dir) {
-    const c = activeTiled();
-    if (c && moveNode(c.leaf, dir)) retile(spaces.get(c.key));
+    onTarget(function (node, s) {
+        if (moveNode(node, dir)) retile(s);
+    });
 }
 
 // Splitting changes no geometry until the next window opens.
 function split(layout) {
-    const c = activeTiled();
-    if (c) splitNode(c.leaf, layout);
+    onTarget(function (node) { splitNode(node, layout); });
 }
 
 function toggleSplitLayout() {
-    const c = activeTiled();
-    if (!c) return;
-    toggleSplit(c.leaf);
-    retile(spaces.get(c.key));
+    onTarget(function (node, s) {
+        toggleSplit(node);
+        retile(s);
+    });
 }
 
 function toggleTabbedLayout() {
-    const c = activeTiled();
-    if (!c) return;
-    toggleTabbed(c.leaf);
-    retile(spaces.get(c.key));
-    // Tabs share one rect: keep the focused one on top.
-    workspace.raiseWindow(c.window);
+    onTarget(function (node, s) {
+        toggleTabbed(node);
+        retile(s);
+        // Tabs share one rect: keep the focused one on top.
+        workspace.raiseWindow(workspace.activeWindow);
+    });
 }
 
 // sign: +1 grows, -1 shrinks; axis: "h" for width, "v" for height.
 function resize(axis, sign) {
-    const c = activeTiled();
-    if (c && resizeNode(c.leaf, axis, sign * config.resizeStep / 100))
-        retile(spaces.get(c.key));
+    onTarget(function (node, s) {
+        if (resizeNode(node, axis, sign * config.resizeStep / 100)) retile(s);
+    });
 }
 
 // i3 "floating toggle". A floated window returns to where it was before it
@@ -63,6 +115,7 @@ function resize(axis, sign) {
 function toggleFloating() {
     const c = activeClient();
     if (!c) return;
+    clearSelection();
     const w = c.window;
     if (c.floating) {
         c.floating = false;

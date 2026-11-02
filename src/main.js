@@ -38,6 +38,8 @@ const shortcuts = [
     ["k3-layout-tabbed", "Toggle Tabbed", "Alt+Shift+W", toggleTabbedLayout],
     ["k3-float-toggle", "Toggle Floating", "Alt+Shift+Space", toggleFloating],
     ["k3-focus-mode-toggle", "Focus Tiled/Floating", "", focusModeToggle],
+    ["k3-focus-parent", "Focus Parent", "Alt+Shift+U", focusParent],
+    ["k3-focus-child", "Focus Child", "Alt+Shift+D", focusChild],
     ["k3-retile", "Retile", "", retileAll]
 ];
 
@@ -45,4 +47,10 @@ shortcuts.forEach(function (s) {
     registerShortcut(s[0], "k3: " + s[1], s[2], guarded(s[3]));
 });
 start();
+// A container picked with focus parent stays picked until focus moves, or the
+// mouse does: KWin's outline swallows clicks, so reaching for the mouse ends
+// the selection and lets the click through.
+workspace.windowActivated.connect(guarded(clearSelection));
+workspace.currentDesktopChanged.connect(guarded(clearSelection));
+workspace.cursorPosChanged.connect(guarded(clearSelection));
 log("loaded, build", K3_BUILD);

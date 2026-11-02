@@ -418,6 +418,47 @@ TestCase {
         fuzzyWeights(root.children[1].weights, [0.4, 0.6])
     }
 
+    // --- containers as targets (focus parent) ---------------------------------
+
+    function test_move_container_swaps_as_a_unit() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        root.weights = [0.3, 0.7]
+        verify(Tree.moveNode(root.children[1], "left"))
+        compare(shape(root), "splith(splitv(b,c),a)")
+        fuzzyWeights(root.weights, [0.7, 0.3])
+    }
+
+    function test_move_container_across_root_axis() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        const con = root.children[1]
+        verify(Tree.moveNode(con, "up"))
+        compare(shape(root), "splitv(splitv(b,c),a)")
+        compare(con.parent, root)
+    }
+
+    function test_neighbor_of_container_uses_its_level() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        const con = root.children[1]
+        compare(Tree.neighbor(con, "left").id, "a")
+        compare(Tree.neighbor(con, "up"), null)
+    }
+
+    function test_split_and_resize_container() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        const con = root.children[1]
+        verify(Tree.resizeNode(con, "h", 0.1))
+        fuzzyWeights(root.weights, [0.4, 0.6])
+        Tree.splitNode(con, "splitv")
+        compare(shape(root), "splith(a,splitv(splitv(b,c)))")
+    }
+
+    function test_node_rect_is_union_of_leaves() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        const area = rect(0, 0, 1000, 600)
+        compare(Tree.nodeRect(root, root.children[1], area, 10, 0), rect(505, 0, 495, 600))
+        compare(Tree.nodeRect(root, find(root, "b"), area, 10, 0), rect(505, 0, 495, 295))
+    }
+
     function test_resize_skips_tabbed_and_reports_missing_axis() {
         const root = build("splith", ["a", ["tabbed", "b", "c"]])
         verify(Tree.resizeNode(find(root, "b"), "h", 0.1))
