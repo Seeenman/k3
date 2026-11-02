@@ -11,14 +11,39 @@ The goals of this project:
 
 ## Status
 
-Phase 0 (scaffolding and spikes) is done. k3 installs, loads, and registers a
-`k3-hello` test shortcut, but it doesn't tile anything yet. See
-[PLAN.md](PLAN.md) for the design, the i3 feature feasibility tables, the
-proposed keybindings and the milestones.
+Phase 1 (core tiling) is done. It was verified in the nested session and
+tried live. k3 tiles windows but has no shortcuts of its own yet; those come in
+phase 2. See [PLAN.md](PLAN.md) for the design, the i3 feature feasibility
+tables, the proposed keybindings and the milestones.
 
 ## How to use
 
-*To be written as features land (phase 5 finishes this).*
+*The full guide is written as features land (phase 5 finishes it).*
+
+What k3 does today:
+- **New windows:** each normal window on a desktop is tiled side by side with
+  the others, and a new window opens right after the focused one.
+- **Floating:** dialogs, modal or fixed-size windows, utility windows, and
+  windows that skip the taskbar float, and k3 leaves them alone.
+- **Your existing KDE keys keep working.** Moving a window to another desktop
+  or screen moves it in the layout. *Keep on all desktops* takes a window out
+  of the tiling until you turn it off again. A minimized window leaves the
+  layout and comes back next to the focused window when restored.
+- **Fullscreen and maximized windows** cover the screen while the others keep
+  their places. A restored window returns to its slot.
+- **Snap-back:** a tiled window that you quick-tile (Meta+arrow) or drag
+  returns to its slot.
+
+Settings (until phase 5 adds a dialog). The class lists are comma-separated
+and matched against a window's class or name:
+
+```sh
+kwriteconfig6 --file kwinrc --group Script-k3 --key gapsInner 8      # px between windows (default 4)
+kwriteconfig6 --file kwinrc --group Script-k3 --key gapsOuter 8      # px at screen edges (default 4)
+kwriteconfig6 --file kwinrc --group Script-k3 --key floatClasses "org.kde.spectacle,steam"
+kwriteconfig6 --file kwinrc --group Script-k3 --key ignoreClasses "plasmashell,krunner"
+make reload
+```
 
 ## Development
 
@@ -36,7 +61,7 @@ Safe testing in a nested KWin (2 virtual screens, isolated config):
 make nested HEADLESS=1 &   # or without HEADLESS to get a visible window
 make nested-load           # load the current build into it
 make nested-run CMD=konsole
-make nested-key K=k3-hello # fire a shortcut via D-Bus
+make nested-key K="Window to Desktop 2"   # fire any KWin shortcut via D-Bus
 grep '\[k3\]' .dev/nested.log
 make nested-stop
 ```
@@ -158,6 +183,38 @@ Still open:
 
 Confirmed by hand: `k3-hello`, bound to a key in System Settings, logged
 `[k3] hello …` when pressed in the live session.
+
+### Phase 1 findings (2026-11-02)
+
+Script loading:
+- **Disabled plugins get unloaded.** `Scripting.start()` unloads any loaded
+  script whose name matches an *installed* plugin that the config doesn't
+  enable. Loading the build as `k3` into the nested session (where it's
+  disabled) failed silently for this reason. `make nested-load` now uses the
+  name `k3-nested`.
+- **Runtime errors aren't logged.** A script that throws while loading just
+  disappears. Syntax errors do show up as `kwin_scripting: file:line: error`.
+  To surface a runtime error, wrap a scratch copy in `try { … } catch (e) {
+  print(e.stack) }`.
+
+KWin tiling:
+- **`window.tile` is deprecated for writing.** Assigning it logs a warning.
+  Release a window with `w.tile.unmanage(w)` instead. Tile objects also have
+  `manage`, `resizeByPixels`, `windows` and `tiles`.
+- **Quick tiling** sets `w.tile`. Maximized means `w.maximizeMode === 3`.
+
+Window types:
+- **zenity's info dialog** reports `normal=true` but `modal=true` and
+  `resizeable=false`, so k3 floats it.
+- **Fullscreen windows** report `resizeable=false`, so k3 only trusts
+  `resizeable` when a window isn't fullscreen.
+
+Focus and geometry:
+- **Focus after close:** when a window closes, KWin activates the next one
+  (most recently used) *before* `windowRemoved` fires.
+- **Hidden windows resize late.** A window on a hidden desktop moves right
+  away, but a Wayland client applies the new size only once its desktop is
+  shown.
 
 
 ### References

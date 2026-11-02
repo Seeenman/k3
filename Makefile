@@ -4,7 +4,7 @@ ID  := k3
 PKG := package
 OUT := $(PKG)/contents/code/main.js
 # Concatenation order matters: later files may use earlier ones at load time.
-SRC := src/main.js
+SRC := src/config.js src/tree.js src/kwin.js src/main.js
 
 # Nested KWin session (make nested). HEADLESS=1 renders to a virtual
 # framebuffer instead of opening a window on the host desktop.
@@ -70,10 +70,12 @@ nested: build
 nested-stop:
 	-pkill -f '^kwin_wayland --socket $(NESTED_SOCKET)'
 
-# (Re)load the freshly built script into the nested KWin.
+# (Re)load the freshly built script into the nested KWin. Not under the name
+# "k3": Scripting.start unloads any script named after an installed plugin
+# that the (nested) config doesn't enable.
 nested-load: build
-	-$(NESTED_QDBUS).unloadScript $(ID)
-	$(NESTED_QDBUS).loadScript $(CURDIR)/$(OUT) $(ID)
+	-$(NESTED_QDBUS).unloadScript $(ID)-nested
+	$(NESTED_QDBUS).loadScript $(CURDIR)/$(OUT) $(ID)-nested
 	$(NESTED_QDBUS).start
 
 # make nested-run CMD=konsole
@@ -83,7 +85,7 @@ nested-run:
 # make nested-key K=k3-hello
 nested-key:
 	$(NESTED_ENV) qdbus6 org.kde.kglobalaccel /component/kwin \
-	  org.kde.kglobalaccel.Component.invokeShortcut $(K)
+	  org.kde.kglobalaccel.Component.invokeShortcut "$(K)"
 
 clean:
 	rm -f $(OUT)

@@ -189,21 +189,22 @@ reachable through the qualifier (`test/tst_engine.qml` guards this).
 
 | Signal | What k3 does |
 |---|---|
-| startup | Adopt existing windows (`workspace.windowList()`, or `stackingOrder`) into one `splith` root per (output, desktop), then retile |
-| `workspace.windowAdded` | Classify the window. If it should be tiled: un-maximize it if it opened maximized, set `tile = null`, insert it after the focused leaf in its root, retile. Connect its per-window signals. |
-| `workspace.windowRemoved` / `closed` | Remove the leaf, normalize, retile. If it was the active window, activate the root's next leaf in focus order (i3 behavior). |
+| startup | Adopt existing windows (`workspace.windowList()`) into one `splith` root per (output, desktop). Retiling is held back until all windows are adopted, then each root is retiled once. |
+| `workspace.windowAdded` | Classify the window. If it should be tiled: un-maximize it if it opened maximized, release it from KWin tiling (`w.tile.unmanage(w)`), insert it after the focused leaf in its root, retile. Connect its per-window signals. |
+| `workspace.windowRemoved` | Remove the leaf, normalize, retile. KWin has already activated the next window in its most-recently-used order (phase 1 found it does this *before* `windowRemoved`), which matches i3, so k3 adds nothing. |
 | `workspace.windowActivated` | Update focus stacks up the tree, reset the selection to the leaf, raise the leaf if it's in a tabbed container (covers Alt+Tab and taskbar clicks) |
-| `w.desktopsChanged` | Move the leaf to the new root, or float it if it's now on all desktops |
-| `w.outputChanged` | Move the leaf to the new output's root (covers KDE *Window to Next Screen* and output hotplug) |
-| `w.minimizedChanged` | Minimized: remove from the tree. Restored: insert next to the focused leaf. |
+| `w.desktopsChanged`, `w.outputChanged`, `w.minimizedChanged` | `sync()`: work out which root the window belongs in now. That's none while it's floating, minimized, or on several or all desktops. If it changed, move the leaf there: remove it from the old root, insert it after the focused leaf of the new one, and retile both. This covers KDE's *Window to Desktop N*, *Window to Next Screen*, *Keep on All Desktops* and output hotplug. |
+| `w.tileChanged` | KDE quick-tiled a tiled window (e.g. Meta+arrow): release it and retile, so it snaps back |
 | `w.fullScreenChanged`, `w.maximizedChanged` | Exclude or include the leaf, then retile |
 | `w.interactiveMoveResizeFinished` | Retile so the window snaps back. Mouse sync is in the backlog. |
 | `workspace.currentDesktopChanged`, `screensChanged`, `virtualScreenGeometryChanged` | Retile the visible roots |
 
-**Applying geometry**: k3 only sets `frameGeometry` when the value actually
-changes. A re-entrancy guard stops k3 from reacting to its own changes. On
-Wayland, resizing is asynchronous (configure/ack), so k3 never reads geometry
-back to make layout decisions; the tree is the source of truth.
+**Applying geometry**: k3 only sets `frameGeometry` when it differs from the
+current geometry by at least a pixel. k3 doesn't listen to
+`frameGeometryChanged` at all, so it can't feed back on its own changes and
+needs no re-entrancy guard. On Wayland, resizing is asynchronous
+(configure/ack), so k3 never reads geometry back to make layout decisions;
+the tree is the source of truth.
 
 Facts confirmed in phase 0 that this design depends on:
 - **Geometry lags.** Reading `frameGeometry` right after setting it returns
@@ -393,15 +394,22 @@ finished).
   ✅ Fired through `invokeShortcut`, and from a key bound in System Settings
   in the live session.
 
-**Phase 1: core tiling on one output**
-- `tree.js`: model, insert/remove, normalization, layout with gaps, and unit
-  tests for all of it.
-- `kwin.js`: window filter, startup adoption, all §5.4 signals, geometry
-  application with the guard, fullscreen/maximize/minimize, snap-back.
+**Phase 1: core tiling on one output** ✅ done 2026-11-02 (verified in the
+nested session; you also tried it live with `make reload` and `make disable`)
+- `tree.js`: model, insert/remove, normalization, layout with gaps.
+  `test/tst_tree.qml` has 24 tests for it.
+- `config.js`: `gapsInner`, `gapsOuter`, `floatClasses`, `ignoreClasses`.
+- `kwin.js`: window filter, startup adoption, the §5.4 signals,
+  fullscreen/maximize/minimize, and snap-back after quick tile.
 - **Done when** opening and closing 1–6 windows on a desktop tiles them
   side by side with gaps, dialogs float, fullscreen works, switching desktops
   and moving windows between them with your existing keys keeps every
   desktop's layout correct, and nothing flickers or loops.
+  ✅ All verified in the headless nested KWin, by firing the same KDE actions
+  your keys trigger through `invokeShortcut`. There were zero geometry changes
+  while idle.
+- Not testable headless: snap-back after a mouse drag. Check it in the live
+  session.
 
 **Phase 2: i3 commands**
 - focus/move by direction, split h/v, toggle split, tabbed (monocle), floating
