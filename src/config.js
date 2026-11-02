@@ -11,8 +11,8 @@ function readClassList(key, fallback) {
 }
 
 const config = {
-    gapsInner: Number(readConfig("gapsInner", 4)),
-    gapsOuter: Number(readConfig("gapsOuter", 4)),
+    gapsInner: Number(readConfig("gapsInner", 10)),
+    gapsOuter: Number(readConfig("gapsOuter", 10)),
     tabPadding: Number(readConfig("tabPadding", 30)),         // px of hidden tabs left showing
     resizeStep: Number(readConfig("resizeStep", 5)),          // % of the parent per keypress
     floatAbove: String(readConfig("floatAbove", true)) !== "false",
