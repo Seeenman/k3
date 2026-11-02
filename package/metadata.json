@@ -1,0 +1,17 @@
+{
+    "KPackageStructure": "KWin/Script",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Email": "riedelsean@gmail.com",
+                "Name": "Sean Riedel"
+            }
+        ],
+        "Description": "i3-inspired manual tiling window manager",
+        "Icon": "view-split-left-right",
+        "Id": "k3",
+        "Name": "k3",
+        "Version": "0.0.1"
+    },
+    "X-Plasma-API": "javascript"
+}
