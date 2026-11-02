@@ -1,4 +1,4 @@
-k3 is an i3 inspired window manager for kde plasma 6 on Wayland.
+k3 is an [i3](https://i3wm.org/) and [aerospace](https://github.com/nikitabobko/AeroSpace) inspired window manager for kde plasma 6 on Wayland.
 
 This readme will contain project notes and 
 be updated as the project progresses with documentation
