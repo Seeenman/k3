@@ -97,28 +97,40 @@ function addWindow(w) {
     const kind = classify(w);
     if (kind === "ignore") return;
     log(kind, w.resourceClass);
-    const c = { window: w, floating: kind === "float", leaf: newLeaf(windowId(w)), key: null };
+    // floatRect: where the window goes if it's floated (its pre-tiling place).
+    // keptAbove: k3 set keepAbove when floating it.
+    const c = { window: w, floating: kind === "float", leaf: newLeaf(windowId(w)), key: null,
+                floatRect: copyRect(w.frameGeometry), keptAbove: false };
     clients.set(windowId(w), c);
-    if (!c.floating) {
-        // Some apps restore a maximized state on launch; tiled windows aren't.
-        if (w.maximizeMode !== 0) w.setMaximize(false, false);
-        if (w.tile) w.tile.unmanage(w);
-    }
-    w.desktopsChanged.connect(function () { sync(c); });
-    w.outputChanged.connect(function () { sync(c); });
-    w.minimizedChanged.connect(function () { sync(c); });
-    w.fullScreenChanged.connect(function () { retileClient(c); });
-    w.maximizedChanged.connect(function () { retileClient(c); });
+    if (!c.floating) claim(w);
+    const onSync = guarded(function () { sync(c); });
+    const onRetile = guarded(function () { retileClient(c); });
+    w.desktopsChanged.connect(onSync);
+    w.outputChanged.connect(onSync);
+    w.minimizedChanged.connect(onSync);
+    w.fullScreenChanged.connect(onRetile);
+    w.maximizedChanged.connect(onRetile);
     // A tiled window dragged or resized with the mouse snaps back.
-    w.interactiveMoveResizeFinished.connect(function () { retileClient(c); });
+    w.interactiveMoveResizeFinished.connect(onRetile);
     // So does one quick-tiled by KDE (e.g. Meta+arrow).
-    w.tileChanged.connect(function () {
+    w.tileChanged.connect(guarded(function () {
         if (c.key && w.tile) {
             w.tile.unmanage(w);
             retileClient(c);
         }
-    });
+    }));
     sync(c);
+}
+
+// Undo KDE states that conflict with tiling: some apps restore a maximized
+// state on launch, and KWin may have quick-tiled the window.
+function claim(w) {
+    if (w.maximizeMode !== 0) w.setMaximize(false, false);
+    if (w.tile) w.tile.unmanage(w);
+}
+
+function copyRect(r) {
+    return { x: r.x, y: r.y, width: r.width, height: r.height };
 }
 
 function removeWindow(w) {
@@ -130,19 +142,19 @@ function removeWindow(w) {
 
 function start() {
     adopting = true;
-    workspace.windowList().forEach(addWindow);
+    workspace.windowList().forEach(guarded(addWindow));
     adopting = false;
     spaces.forEach(retile);
 
     // windowActivated arrives before windowAdded for a new window; that
     // window isn't known yet, and attachClient focuses it instead.
-    workspace.windowActivated.connect(function (w) {
+    workspace.windowActivated.connect(guarded(function (w) {
         const c = w && clients.get(windowId(w));
         if (c && c.key) focusNode(c.leaf);
-    });
-    workspace.windowAdded.connect(addWindow);
-    workspace.windowRemoved.connect(removeWindow);
-    workspace.currentDesktopChanged.connect(retileVisible);
-    workspace.screensChanged.connect(retileVisible);
-    workspace.virtualScreenGeometryChanged.connect(retileVisible);
+    }));
+    workspace.windowAdded.connect(guarded(addWindow));
+    workspace.windowRemoved.connect(guarded(removeWindow));
+    workspace.currentDesktopChanged.connect(guarded(retileVisible));
+    workspace.screensChanged.connect(guarded(retileVisible));
+    workspace.virtualScreenGeometryChanged.connect(guarded(retileVisible));
 }

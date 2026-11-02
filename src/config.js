@@ -13,6 +13,8 @@ function readClassList(key, fallback) {
 const config = {
     gapsInner: Number(readConfig("gapsInner", 4)),
     gapsOuter: Number(readConfig("gapsOuter", 4)),
+    resizeStep: Number(readConfig("resizeStep", 5)),          // % of the parent per keypress
+    floatAbove: String(readConfig("floatAbove", true)) !== "false",
     floatClasses: readClassList("floatClasses",
         "org.kde.spectacle,org.kde.polkit-kde-authentication-agent-1,pinentry-qt"),
     ignoreClasses: readClassList("ignoreClasses",

@@ -4,7 +4,8 @@ ID  := k3
 PKG := package
 OUT := $(PKG)/contents/code/main.js
 # Concatenation order matters: later files may use earlier ones at load time.
-SRC := src/config.js src/tree.js src/kwin.js src/main.js
+SRC := src/config.js src/tree.js src/kwin.js src/commands.js src/main.js
+KEYS_FILE ?= $(HOME)/.config/kglobalshortcutsrc
 
 # Nested KWin session (make nested). HEADLESS=1 renders to a virtual
 # framebuffer instead of opening a window on the host desktop.
@@ -13,7 +14,7 @@ NESTED_SIZE   := --width 1600 --height 900 --output-count 2
 NESTED_ENV     = DBUS_SESSION_BUS_ADDRESS='$(shell cat .dev/bus 2>/dev/null)' WAYLAND_DISPLAY=$(NESTED_SOCKET)
 NESTED_QDBUS   = $(NESTED_ENV) qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting
 
-.PHONY: build install uninstall enable disable reload logs test \
+.PHONY: build install uninstall enable disable reload logs check-keys test \
         nested nested-stop nested-load nested-run nested-key clean
 
 build: $(OUT)
@@ -41,13 +42,23 @@ disable:
 	kwriteconfig6 --file kwinrc --group Plugins --key $(ID)Enabled false
 	qdbus6 org.kde.KWin /KWin reconfigure
 
-# Upgrade the installed package and restart the script in the running KWin.
+# Upgrade the installed package and (re)start the script in the running KWin.
+# Scripting.start only loads enabled plugins, so this enables k3 too. A script
+# that throws while loading just disappears, hence the final check.
 reload: install
+	kwriteconfig6 --file kwinrc --group Plugins --key $(ID)Enabled true
 	qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.unloadScript $(ID)
 	qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.start
+	@qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.isScriptLoaded $(ID) | grep -q true \
+	  || { echo "k3 did not load; see make logs"; exit 1; }
 
 logs:
 	journalctl --user -f -o cat -u plasma-kwin_wayland | grep --line-buffered '\[k3\]'
+
+# KDE lets two actions share a key (which one fires is then undefined), so
+# list every key a k3 shortcut shares with another action.
+check-keys:
+	@awk -f tools/check-keys.awk $(KEYS_FILE)
 
 # --- tests ------------------------------------------------------------------
 

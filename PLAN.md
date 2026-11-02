@@ -222,7 +222,12 @@ Facts confirmed in phase 0 that this design depends on:
 
 ### 5.5 Commands (`commands.js`)
 
-All commands act on the **selected node** of the active window's root.
+All commands act on the **active window's leaf**. Phase 3 switches them to
+the root's **selected node**, which can be a container. If the active window
+isn't tiled (floating, or no window), the tree commands do nothing. The pure
+tree operations are `neighbor`, `moveNode`, `splitNode`, `toggleSplit`,
+`toggleTabbed` and `resizeNode` in `tree.js`; `test/tst_tree.qml` covers
+them.
 
 - **focus ⟨dir⟩**: walk up from the selected node until reaching a parent whose
   axis matches the direction (`splith` or `tabbed` for left/right, `splitv` for
@@ -232,7 +237,10 @@ All commands act on the **selected node** of the active window's root.
 - **move ⟨dir⟩**:
   - If the sibling in that direction (in a parent on the matching axis) is a
     leaf, swap with it.
-  - If that sibling is a container, move into it at the edge facing us.
+  - If that sibling is a container, move into it, next to the leaf found by
+    walking down: on the move's axis take the near edge, across it take the
+    focused child. That's i3's `con_descend_direction`. Moving *down* into a
+    horizontal container therefore joins its row, next to its focused window.
   - If there's no sibling in that direction, move out: go to the nearest
     ancestor on the matching axis and insert beside it.
   - At the root, if the root's axis doesn't match, wrap the root's children in
@@ -245,14 +253,17 @@ All commands act on the **selected node** of the active window's root.
   previous split layout. Inside a tabbed container, left/right steps through
   the tabs.
 - **floating toggle**:
-  - Tiled → floating: remove from the tree. Restore the geometry saved when
-    the window was first tiled, or else center it at 60% of the area. Set
-    `keepAbove` if `floatAbove` is on (i3 keeps floating windows above tiled
-    ones).
-  - Floating → tiled: insert next to the focused leaf, and undo `keepAbove`
-    if k3 set it.
-- **focus mode_toggle**: activate the most recent floating window, or the most
-  recent tiled one if a floating window has focus.
+  - Tiled → floating: remove from the tree and restore the geometry the
+    window had when k3 first saw it. If that nearly fills the screen (≥90% in
+    both dimensions), center it at two thirds of the screen instead. Apps
+    like konsole reopen at their last *tiled* size, so the saved geometry is
+    often useless. Set `keepAbove` if `floatAbove` is on (i3 keeps floating
+    windows above tiled ones).
+  - Floating → tiled: remember the current geometry for next time, insert
+    next to the focused leaf, and undo `keepAbove` if k3 set it.
+- **focus mode_toggle**: from a tiled window, activate the topmost untiled
+  window (floating, sticky) on the same screen and desktop. From anything
+  else, activate the workspace's focused leaf.
 - **resize ⟨grow|shrink⟩ ⟨width|height⟩**: from the selected node, find the
   nearest ancestor on the matching axis where the node has a sibling. Move
   `resizeStep` (default 5%) of weight between the node and its next sibling, or
@@ -261,7 +272,12 @@ All commands act on the **selected node** of the active window's root.
   along the focus stack. While the selection is a container, show it with
   `workspace.showOutline(rect)`. Hide the outline when the selection returns to
   a leaf, or on any external activation.
-- **retile** (recovery): rebuild the visible roots and re-apply geometry.
+- **retile** (recovery): re-run `sync()` for every window, then re-apply the
+  visible layouts.
+
+Every shortcut and signal handler is wrapped in `guarded()`, which logs
+`[k3] error: …` with a stack trace. KWin itself silently drops exceptions
+thrown from callbacks (phase 2 finding).
 
 ### 5.6 Configuration (`config.js`)
 
@@ -275,8 +291,7 @@ They're hard-coded defaults until phase 5 adds the settings dialog.
 | `floatClasses` | `"spectacle,org.kde.polkit-kde-authentication-agent-1,…"` | comma-separated window classes that always float |
 | `ignoreClasses` | `"plasmashell,krunner,ksmserver-logout-greeter,…"` | window classes k3 never touches |
 | `resizeStep` | 5 | % of the parent per resize keypress |
-| `floatAbove` | true | floating windows get `keepAbove` |
-| `osdHints` | false | show a Plasma OSD for split direction / tab position (§3, Medium) |
+| `floatAbove` | true | windows k3 floats get `keepAbove` |
 
 ## 6. Keybindings
 
@@ -290,13 +305,14 @@ in System Settings under **KWin**, and searching "k3" lists them all.
   assumption that KDE would leave the k3 action unbound: kglobalaccel binds it
   anyway, so two actions share one key. Which one fires is undefined. The keys
   under "Conflicts to clear" below **must** be unbound before k3 is enabled.
-  Phase 2: at startup, k3 checks each of its keys with
-  `callDBus(… "getGlobalShortcutsByKey" …)` and logs a warning for any
-  duplicate.
+  `make check-keys` (`tools/check-keys.awk`) lists every key a k3 shortcut
+  shares with another action, and exits non-zero if there's any. This
+  replaces the planned startup check over `callDBus`: a make target is
+  simpler and adds no code to the script.
 - **Changing a default in code doesn't change existing installs.** Whatever is
   stored in `kglobalshortcutsrc` wins.
 
-### Shortcuts k3 registers (proposed defaults; please review)
+### Shortcuts k3 registers (defaults; registered since phase 2, except parent/child in phase 3)
 
 Your current Alt bindings leave **Alt+B/D/F/G/I/Q/T/U/V/W/X/Y** free. Those
 look like they're reserved on purpose: Emacs M-x/M-w/M-f/M-b/M-d/M-v/M-y, and
@@ -408,18 +424,22 @@ nested session; you also tried it live with `make reload` and `make disable`)
   ✅ All verified in the headless nested KWin, by firing the same KDE actions
   your keys trigger through `invokeShortcut`. There were zero geometry changes
   while idle.
-- Not testable headless: snap-back after a mouse drag. Check it in the live
-  session.
+- Snap-back after a mouse drag can't be tested headless. ✅ Confirmed by you
+  in the live session (phase 2 build).
 
-**Phase 2: i3 commands**
-- focus/move by direction, split h/v, toggle split, tabbed (monocle), floating
-  toggle + `floatClasses`, focus mode_toggle, keyboard resize, retile. Register
-  the shortcuts from §6.
-- Unit tests for the navigation, move and resize algorithms.
-- Optional: `osdHints`.
+**Phase 2: i3 commands** ✅ done 2026-11-02 (verified in the nested session,
+then loaded live by you)
+- `src/commands.js`: focus/move by direction, split h/v, toggle split, tabbed
+  (monocle), floating toggle, focus mode_toggle, keyboard resize, retile.
+- `src/main.js`: the §6 shortcut table, plus `guarded()`.
+- `tree.js` command operations, with 25 more unit tests (49 tree tests).
+- `make check-keys` for duplicate key bindings.
+- `osdHints` was not built; it's in the backlog.
 - **Done when** a nested layout (e.g. `[A | [B / C]]`) can be built, rearranged,
   resized and tabbed using only shortcuts, and the README's keybinding table
-  matches the code.
+  matches the code. ✅ Verified in the nested KWin through `invokeShortcut`:
+  building `[A | [B / C]]`, every focus direction, five kinds of move, resize,
+  tabbed on/off, float/unfloat, and focus mode toggle.
 
 **Phase 3: focus parent/child**
 - Selection pointer, outline indicator, and move/split/layout/resize acting on
@@ -445,6 +465,9 @@ nested session; you also tried it live with `make reload` and `make disable`)
 
 Easiest first:
 - `workspace back_and_forth`: k3 tracks the previous desktop; about 10 lines.
+- `osdHints`: a Plasma OSD (`org.kde.osdService.showText` over `callDBus`)
+  after split / layout commands. Without it nothing shows the split direction
+  or tab position, because k3 keeps KDE titlebars and draws no borders.
 - Scratchpad: send to scratchpad / toggle scratchpad.
 - Mouse sync: when a tiled window is dropped, re-insert it next to the window
   under the cursor (`workspace.windowAt`). When it's resized with the mouse,

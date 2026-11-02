@@ -11,10 +11,10 @@ The goals of this project:
 
 ## Status
 
-Phase 1 (core tiling) is done. It was verified in the nested session and
-tried live. k3 tiles windows but has no shortcuts of its own yet; those come in
-phase 2. See [PLAN.md](PLAN.md) for the design, the i3 feature feasibility
-tables, the proposed keybindings and the milestones.
+Phase 2 (the i3 commands and their shortcuts) is done. It was verified in the
+nested session and is running live. Next up is phase 3 (focus
+parent/child). See [PLAN.md](PLAN.md) for the design, the i3 feature
+feasibility tables and the milestones.
 
 ## How to use
 
@@ -34,12 +34,49 @@ What k3 does today:
 - **Snap-back:** a tiled window that you quick-tile (Meta+arrow) or drag
   returns to its slot.
 
-Settings (until phase 5 adds a dialog). The class lists are comma-separated
-and matched against a window's class or name:
+### Keybindings
+
+Every k3 action is listed in **System Settings → Keyboard → Shortcuts →
+KWin**; search for "k3" to rebind any of them. A rebind takes effect
+immediately, and k3's code defaults never override it. Afterwards, run
+`make check-keys` to catch a key that's also bound elsewhere.
+
+| Action | Default | Notes |
+|---|---|---|
+| Focus left / down / up / right | Alt+H / J / K / L | Entering a container lands on its last-focused window. In a tabbed container, left/right switch tabs. |
+| Move left / down / up / right | Alt+Shift+H / J / K / L | Swaps with a neighbor, enters a neighboring container, or steps out of the current one |
+| Shrink width / grow height / shrink height / grow width | Ctrl+Alt+H / J / K / L | `resizeStep` % of the parent per press |
+| Split horizontal / vertical | Alt+Shift+B / Alt+Shift+V | The next window opens beside / below the focused one |
+| Toggle split direction | Alt+Shift+T | Flips the focused window's container |
+| Toggle tabbed | Alt+Shift+W | Tabbed has no tab bar: the focused tab covers the others |
+| Toggle floating | Alt+Shift+Space | A floated window stays above the tiled ones (`floatAbove`) |
+| Focus tiled ↔ floating | *(none)* | |
+| Retile | *(none)* | Recovery: re-checks every window and re-applies the layouts |
+
+The rest of i3's keys are KDE's own actions, which k3 follows: switch to or
+move to desktop N, fullscreen, close, keep on all desktops, and switch to or
+move to the next screen.
+
+**Before enabling k3, unbind the KDE actions that use the same keys.** KDE
+doesn't refuse a duplicate: both actions get the key, and which one fires is
+undefined. With your current setup that means *Walk Through Windows* (all
+four Alt+H/J/K/L variants) and *Quick Tile Window* Left/Bottom/Top/Right
+(Alt+Shift+H/J/K/L). After loading k3, run:
+
+```sh
+make check-keys   # lists every key a k3 shortcut shares with another action
+```
+
+### Settings
+
+Until phase 5 adds a dialog, set these with `kwriteconfig6`. The class lists
+are comma-separated and matched against a window's class or name:
 
 ```sh
 kwriteconfig6 --file kwinrc --group Script-k3 --key gapsInner 8      # px between windows (default 4)
 kwriteconfig6 --file kwinrc --group Script-k3 --key gapsOuter 8      # px at screen edges (default 4)
+kwriteconfig6 --file kwinrc --group Script-k3 --key resizeStep 10    # % of the parent per resize press (default 5)
+kwriteconfig6 --file kwinrc --group Script-k3 --key floatAbove false # don't keep floated windows above (default true)
 kwriteconfig6 --file kwinrc --group Script-k3 --key floatClasses "org.kde.spectacle,steam"
 kwriteconfig6 --file kwinrc --group Script-k3 --key ignoreClasses "plasmashell,krunner"
 make reload
@@ -51,7 +88,8 @@ make reload
 make test                  # unit tests (Qt 6 qmltestrunner, offscreen)
 make install enable        # install the package into ~/.local/share/kwin/scripts and turn it on
 make reload                # after editing src/: rebuild and restart k3 in the live session
-make logs                  # follow k3's log lines in the journal
+make logs                  # follow k3's log lines in the journal (errors show as "[k3] error: …")
+make check-keys            # keys a k3 shortcut shares with another action
 make disable / uninstall
 ```
 
@@ -215,6 +253,24 @@ Focus and geometry:
 - **Hidden windows resize late.** A window on a hidden desktop moves right
   away, but a Wayland client applies the new size only once its desktop is
   shown.
+
+### Phase 2 findings (2026-11-02)
+
+- **Callback exceptions are silent too.** An exception thrown inside a
+  `registerShortcut` callback or a signal handler disappears without a log
+  line. k3 wraps every handler in `guarded()`, which logs `[k3] error: …`
+  plus the stack.
+- **Apps reopen at their last size.** konsole comes back at 1592×892 after
+  being closed while tiled full-width. So "the geometry before k3 tiled it"
+  can be near full-screen. Floating falls back to two thirds of the screen,
+  centered, when the saved geometry is at least 90% of the screen both ways.
+- **Activation works for keyboard focus.** `workspace.activeWindow = w`
+  focuses and raises the window. Raising the focused tab is enough to make
+  monocle tabbed work.
+- **Duplicate shortcuts.** KDE stores script shortcuts in the canonical
+  modifier order (`Ctrl+Alt+H`, not `Alt+Ctrl+H`). `make check-keys` parses
+  `kglobalshortcutsrc`: keys are joined by a literal `\t`, and an escaped
+  comma is `\\,`.
 
 
 ### References

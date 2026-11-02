@@ -226,4 +226,202 @@ TestCase {
         compare(c.x + c.width, Math.round(0.4 + 1001.3 - 4))
         verify(Math.max(a.width, b.width, c.width) - Math.min(a.width, b.width, c.width) <= 1)
     }
+
+    // --- neighbor (focus <dir>) -------------------------------------------------
+
+    function test_neighbor_siblings() {
+        const root = build("splith", ["a", "b", "c"])
+        compare(Tree.neighbor(find(root, "b"), "left").id, "a")
+        compare(Tree.neighbor(find(root, "b"), "right").id, "c")
+        compare(Tree.neighbor(find(root, "b"), "up"), null)
+        compare(Tree.neighbor(find(root, "a"), "left"), null)
+    }
+
+    function test_neighbor_climbs_to_matching_axis() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        compare(Tree.neighbor(find(root, "c"), "left").id, "a")
+        compare(Tree.neighbor(find(root, "c"), "up").id, "b")
+        compare(Tree.neighbor(find(root, "b"), "up"), null)
+        compare(Tree.neighbor(find(root, "a"), "right"), root.children[1])
+    }
+
+    function test_focus_into_container_lands_on_its_focused_window() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        Tree.focusNode(find(root, "c"))
+        Tree.focusNode(find(root, "a"))
+        compare(Tree.focusedLeaf(Tree.neighbor(find(root, "a"), "right")).id, "c")
+    }
+
+    function test_neighbor_in_tabbed_steps_through_tabs() {
+        const root = build("splith", ["a", ["tabbed", "b", "c"]])
+        compare(Tree.neighbor(find(root, "b"), "right").id, "c")
+        compare(Tree.neighbor(find(root, "c"), "right"), null)
+        compare(Tree.neighbor(find(root, "b"), "left").id, "a")
+    }
+
+    // --- moveNode (move <dir>) --------------------------------------------------
+
+    function test_move_swaps_with_sibling_window() {
+        const root = build("splith", ["a", "b", "c"])
+        root.weights = [0.5, 0.25, 0.25]
+        verify(Tree.moveNode(find(root, "a"), "right"))
+        compare(shape(root), "splith(b,a,c)")
+        fuzzyWeights(root.weights, [0.25, 0.5, 0.25])
+    }
+
+    function test_move_swaps_vertically_inside_container() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        verify(Tree.moveNode(find(root, "c"), "up"))
+        compare(shape(root), "splith(a,splitv(c,b))")
+    }
+
+    function test_move_into_container_next_to_its_focused_window() {
+        const root = build("splith", ["a", ["splitv", "b", "c"], "d"])
+        Tree.focusNode(find(root, "c"))
+        verify(Tree.moveNode(find(root, "a"), "right"))
+        compare(shape(root), "splith(splitv(b,a,c),d)")
+        compare(Tree.focusedLeaf(root).id, "a")
+    }
+
+    function test_move_into_container_across_its_axis_joins_its_layout() {
+        const root = build("splitv", ["a", ["splith", "b", ["splitv", "c", "d"]]])
+        verify(Tree.moveNode(find(root, "a"), "down"))
+        // Across splith we take its focused child (b) and a joins splith in
+        // front of it, as in i3; the root then absorbs the lone splith.
+        compare(shape(root), "splith(a,b,splitv(c,d))")
+    }
+
+    function test_move_into_container_along_its_axis_enters_at_near_edge() {
+        const root = build("splith", ["a", ["splith", "b", "c"]])
+        Tree.focusNode(find(root, "c"))
+        verify(Tree.moveNode(find(root, "a"), "right"))
+        // Near edge (b), not the focused child (c).
+        compare(shape(root), "splith(a,b,c)")
+    }
+
+    function test_move_into_tabbed_makes_a_tab() {
+        const root = build("splith", ["a", ["tabbed", "b", "c"], "d"])
+        verify(Tree.moveNode(find(root, "d"), "left"))
+        compare(shape(root), "splith(a,tabbed(b,c,d))")
+    }
+
+    function test_move_steps_out_of_container() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        verify(Tree.moveNode(find(root, "c"), "right"))
+        compare(shape(root), "splith(a,b,c)")
+        compare(Tree.focusedLeaf(root).id, "c")
+    }
+
+    function test_move_steps_out_to_the_left() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        verify(Tree.moveNode(find(root, "b"), "left"))
+        compare(shape(root), "splith(a,b,c)")
+    }
+
+    function test_move_at_workspace_edge_does_nothing() {
+        const root = build("splith", ["a", "b"])
+        verify(!Tree.moveNode(find(root, "a"), "left"))
+        compare(shape(root), "splith(a,b)")
+        const single = build("splith", ["a"])
+        verify(!Tree.moveNode(find(single, "a"), "up"))
+    }
+
+    function test_move_across_root_axis_reorients_root() {
+        const root = build("splitv", ["a", "b"])
+        verify(Tree.moveNode(find(root, "a"), "right"))
+        compare(shape(root), "splith(b,a)")
+        compare(root.type, "root")
+    }
+
+    function test_move_across_root_axis_wraps_the_rest() {
+        const root = build("splitv", ["a", "b", "c"])
+        verify(Tree.moveNode(find(root, "a"), "left"))
+        compare(shape(root), "splith(a,splitv(b,c))")
+        fuzzyWeights(root.weights, [0.5, 0.5])
+    }
+
+    function test_move_across_root_axis_after_root_absorbs() {
+        // Removing a leaves the root holding only splith(b,c), which it
+        // absorbs; a then simply goes on the right.
+        const root = build("splitv", ["a", ["splith", "b", "c"]])
+        verify(Tree.moveNode(find(root, "a"), "right"))
+        compare(shape(root), "splith(b,c,a)")
+    }
+
+    // --- splitNode / toggles ----------------------------------------------------
+
+    function test_split_lone_child_reorients_parent() {
+        const root = build("splith", ["a"])
+        Tree.splitNode(find(root, "a"), "splitv")
+        compare(shape(root), "splitv(a)")
+    }
+
+    function test_split_wraps_window_and_next_window_joins_it() {
+        const root = build("splith", ["a", "b"])
+        root.weights = [0.3, 0.7]
+        Tree.focusNode(find(root, "b"))
+        Tree.splitNode(find(root, "b"), "splitv")
+        compare(shape(root), "splith(a,splitv(b))")
+        fuzzyWeights(root.weights, [0.3, 0.7])
+        compare(Tree.focusedLeaf(root).id, "b")
+        Tree.insertAfter(find(root, "b"), Tree.newLeaf("c"))
+        compare(shape(root), "splith(a,splitv(b,c))")
+    }
+
+    function test_toggle_split_flips_orientation() {
+        const root = build("splith", ["a", "b"])
+        Tree.toggleSplit(find(root, "a"))
+        compare(root.layout, "splitv")
+        Tree.toggleSplit(find(root, "a"))
+        compare(root.layout, "splith")
+    }
+
+    function test_toggle_tabbed_remembers_split_layout() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        const con = root.children[1]
+        Tree.toggleTabbed(find(root, "b"))
+        compare(con.layout, "tabbed")
+        Tree.toggleTabbed(find(root, "b"))
+        compare(con.layout, "splitv")
+        Tree.toggleTabbed(find(root, "b"))
+        Tree.toggleSplit(find(root, "b"))
+        compare(con.layout, "splitv")
+    }
+
+    // --- resizeNode -------------------------------------------------------------
+
+    function test_resize_grows_into_next_sibling() {
+        const root = build("splith", ["a", "b", "c"])
+        verify(Tree.resizeNode(find(root, "a"), "h", 0.1))
+        fuzzyWeights(root.weights, [1/3 + 0.1, 1/3 - 0.1, 1/3])
+    }
+
+    function test_resize_last_child_trades_with_previous() {
+        const root = build("splith", ["a", "b"])
+        verify(Tree.resizeNode(find(root, "b"), "h", -0.1))
+        fuzzyWeights(root.weights, [0.6, 0.4])
+    }
+
+    function test_resize_clamps_at_minimum() {
+        const root = build("splith", ["a", "b"])
+        Tree.resizeNode(find(root, "a"), "h", 0.9)
+        fuzzyWeights(root.weights, [0.95, 0.05])
+        Tree.resizeNode(find(root, "a"), "h", -2)
+        fuzzyWeights(root.weights, [0.05, 0.95])
+    }
+
+    function test_resize_climbs_to_ancestor_on_axis() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        verify(Tree.resizeNode(find(root, "c"), "h", 0.1))
+        fuzzyWeights(root.weights, [0.4, 0.6])
+        verify(Tree.resizeNode(find(root, "c"), "v", 0.1))
+        fuzzyWeights(root.children[1].weights, [0.4, 0.6])
+    }
+
+    function test_resize_skips_tabbed_and_reports_missing_axis() {
+        const root = build("splith", ["a", ["tabbed", "b", "c"]])
+        verify(Tree.resizeNode(find(root, "b"), "h", 0.1))
+        fuzzyWeights(root.weights, [0.4, 0.6])
+        verify(!Tree.resizeNode(find(root, "a"), "v", 0.1))
+    }
 }
