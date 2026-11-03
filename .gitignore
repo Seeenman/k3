@@ -3,6 +3,3 @@ package/contents/code/main.js
 
 # nested KWin dev session state (make nested)
 .dev/
-
-# local KDE config snapshots (backed up elsewhere)
-kde_plasma_config/
