@@ -330,6 +330,12 @@ function nearestInDirection(from, candidates, dir) {
 
 // --- layout -----------------------------------------------------------------
 
+// Whether a and b are the same rect. A missing rect (null/undefined) never
+// matches, so "no rect yet" always counts as a change.
+function sameRect(a, b) {
+    return !!a && !!b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+}
+
 // Map of leaf id -> integer rect {x, y, width, height} for every leaf under
 // root, inside area shrunk by gapsOuter, with gapsInner between siblings and
 // tabPadding (default 0) for the slivers of tabs behind the visible one.

@@ -69,17 +69,23 @@ function detachClient(c) {
     c.key = null;
 }
 
+function outputNamed(name) {
+    return workspace.screens.find(function (o) { return o.name === name; }) || null;
+}
+
 // The space's usable screen area, or null while its output or desktop is gone
 // (its windows are then on their way elsewhere).
 function spaceArea(s) {
-    const output = workspace.screens.find(function (o) { return o.name === s.outputName; });
+    const output = outputNamed(s.outputName);
     const desktop = workspace.desktops.find(function (d) { return d.id === s.desktopId; });
     return output && desktop ? workspace.clientArea(KWin.MaximizeArea, output, desktop) : null;
 }
 
+// s.area: the area the space was last laid out in (see watchAreas).
 function retile(s) {
     const area = spaceArea(s);
     if (adopting || !area) return;
+    s.area = copyRect(area);
     layoutRects(s.root, area, config.gapsInner, config.gapsOuter, config.tabPadding).forEach(function (rect, id) {
         const c = clients.get(id);
         const w = c.window;
@@ -93,9 +99,7 @@ function retile(s) {
         const g = w.frameGeometry;
         const inPlace = Math.abs(g.x - rect.x) < 1 && Math.abs(g.y - rect.y) < 1
             && Math.abs(g.width - rect.width) < 1 && Math.abs(g.height - rect.height) < 1;
-        const requested = c.lastRect && c.lastRect.x === rect.x && c.lastRect.y === rect.y
-            && c.lastRect.width === rect.width && c.lastRect.height === rect.height;
-        if (inPlace && requested) return;
+        if (inPlace && sameRect(c.lastRect, rect)) return;
         c.lastRect = rect;
         w.frameGeometry = rect;
     });
@@ -105,11 +109,30 @@ function retileClient(c) {
     if (c.key) retile(spaces.get(c.key));
 }
 
+// The spaces on screen right now: one per output at most.
+function visibleSpaces() {
+    return workspace.screens.map(function (output) {
+        return spaces.get(spaceKey(output, workspace.currentDesktopForScreen(output)));
+    }).filter(function (s) { return s; });
+}
+
 function retileVisible() {
-    workspace.screens.forEach(function (output) {
-        const s = spaces.get(spaceKey(output, workspace.currentDesktopForScreen(output)));
-        if (s) retile(s);
-    });
+    visibleSpaces().forEach(retile);
+}
+
+// KWin has no signal for a change in a screen's usable area: a panel
+// appearing (plasmashell creates a replugged screen's panel after the screen,
+// and may start after k3), hiding or changing size. So once a second, retile
+// each visible space whose area isn't the one it was laid out in.
+const areaTimer = new QTimer();
+function watchAreas() {
+    areaTimer.interval = 1000;
+    areaTimer.timeout.connect(guarded(function () {
+        visibleSpaces().forEach(function (s) {
+            if (!sameRect(spaceArea(s), s.area)) retile(s);
+        });
+    }));
+    areaTimer.start();
 }
 
 function addWindow(w) {
@@ -180,4 +203,5 @@ function start() {
     workspace.currentDesktopChanged.connect(guarded(retileVisible));
     workspace.screensChanged.connect(guarded(retileVisible));
     workspace.virtualScreenGeometryChanged.connect(guarded(retileVisible));
+    watchAreas();
 }

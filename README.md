@@ -14,9 +14,15 @@ The goals of this project:
 Phases 1–4 are implemented: tiling, the i3 commands, focus parent/child and
 multi-monitor support, plus an AeroSpace-style accordion for tabbed layouts.
 Everything up to the accordion is in daily use. Multi-monitor support is
-verified on virtual screens and still needs a check on real monitors. Next is
-phase 5, a settings dialog in System Settings. See [PLAN.md](PLAN.md) for the
-design and the milestones.
+verified on real monitors: a monitor above a laptop screen scaled to 120%,
+with panels. That check found and fixed three bugs that virtual screens can't
+show. Next:
+- moving a selected container to another screen;
+- keeping layouts across an unplug and replug;
+- a binary tree layout as the new default.
+
+Then phase 5, a settings dialog in System Settings. See [PLAN.md](PLAN.md)
+for the design and the milestones.
 
 ## Contents
 
@@ -244,25 +250,29 @@ accordion rather than i3's tabbed layout.
 - **Several monitors:**
   - **Crossing screens:** focus and move continue onto the next screen at
     the edge of a screen's layout, including onto an empty screen.
+  - **The keys follow the focused window,** not the mouse pointer: Alt+H/J/K/L
+    walk from the screen the focused window is on, wherever the pointer
+    rests.
   - **Which screen is next:** screens count as neighbors when they're side
-    by side or stacked, not diagonal.
+    by side or stacked, even offset, but not diagonal.
   - **KDE's screen actions:** *Window to Next Screen* works as well.
+- **Panels:** layouts stay clear of panels on each screen. When a panel
+  appears, hides or changes size, k3 re-tiles within a second.
 - **Unplugging a monitor:** KWin moves its windows to a remaining screen and
-  k3 tiles them there, in the order they arrive. On replug, KWin moves them
-  back.
+  k3 tiles them there. They arrive one by one after the focused window, so
+  their left-to-right order and their containers aren't kept. On replug,
+  KWin moves some of them back, but not reliably all: after a real cable
+  replug, most windows stayed where they were.
 - **Per-screen desktops** (Plasma 6.7+): a window moved to another screen
   lands on the desktop that screen is showing.
-- Multi-monitor support is verified on virtual screens; testing on real
-  monitors is still to come.
 
 ### Mouse
 
 - **Tiled windows snap back:** a tiled window you drag, or quick-tile
   (Meta+arrow, dragging to a screen edge), returns to its slot. Use the move
   keys to rearrange.
-- **Clicking a window focuses it** as usual. Clicking a tab's sliver should
-  also switch to that tab, since a click activates the window; that hasn't
-  been tested yet.
+- **Clicking a window focuses it** as usual, and clicking a tab's sliver
+  switches to that tab.
 - **Floating windows** can be dragged and resized freely.
 
 ## Settings
@@ -421,11 +431,27 @@ screen.
   Alt+Shift+W and Alt+Shift+T.
 - **2026-11-02: phase 4 built and tested on virtual screens** ahead of real
   two-monitor hardware.
+- **2026-11-02: phase 4 checked on real monitors.**
+  - Focus keys follow the focused window's screen, not KWin's active screen
+    (which follows the pointer).
+  - k3 checks the screens' usable areas once a second, because KWin has no
+    signal for it.
+- **2026-11-02: moving between screens.**
+  - A selected container may move to another screen, as in i3.
+  - On unplug, a screen's layouts keep their order (and their containers),
+    and they're put back on replug.
+- **2026-11-02: binary tree layout requested,** to become the default for
+  new sessions. This revises "no autotiling" from the initial design.
 
 ### Environment (dev machine)
 
-- Plasma / KWin 6.8.2, Qt 6.12, Wayland, 1 screen. KWin runs as the
+- Plasma / KWin 6.8.2, Qt 6.12, Wayland. KWin runs as the
   `plasma-kwin_wayland` user service.
+- 2 screens, one above the other:
+  - HDMI-A-2: a 1920×1080 monitor at 0,0, scale 1.
+  - eDP-1: the laptop screen, 1920×1080 at scale 1.2 (1600×900 logical), at
+    145,1080, so it's offset 145px to the right.
+  - Each has a 30px floating panel at the top.
 - 11 fixed, named virtual desktops (scratch1, scratch2, scratch, reading,
   messages, notes, video calls, code, emacs, all, photos), switched with
   Alt+letter and moved to with Alt+Shift+letter.
@@ -616,10 +642,11 @@ Geometry:
   wasn't asked to go elsewhere. Idle churn is still zero.
 
 Screens:
-- **Focus lingers on a screen you've left.** When KWin switches to an empty
-  screen (`slotSwitchTo*Screen`), the last window stays active on the other
-  screen. Activating an already active window does nothing, so coming back
-  needs the slot too.
+- **Focus lingers on a screen you've left** in a bare KWin. When KWin
+  switches to an empty screen (`slotSwitchTo*Screen`), the last window stays
+  active on the other screen. Activating an already active window does
+  nothing, so coming back needs the slot too. *Plasma behaves differently;
+  see the real-monitor findings below.*
 - **Output names in the nested session:** Virtual-0 and Virtual-1, side by
   side. `kscreen-doctor output.Virtual-1.disable` / `.enable` simulates an
   unplug and replug. KWin moves the windows off and, on replug, back again.
@@ -633,6 +660,76 @@ Desktops:
   there in the next, which made a test's desktop names misleading.
   `make nested` now empties `.dev/config` on every start. k3 itself keys
   spaces by desktop id, never by name.
+
+Real monitors (the 2 screens under [Environment](#environment-dev-machine)):
+- **How it was tested.** Shortcuts were fired over D-Bus. A throwaway,
+  read-only KWin script (kept outside the repo) logged each window's
+  geometry, output and desktop on a shortcut, and timestamped every geometry,
+  output, desktop and activation change. You moved the mouse and clicked
+  where only a human could.
+- **KWin's active screen follows the pointer.** Moving the pointer onto
+  another screen makes it `workspace.activeScreen`, while the focused window
+  stays where it is. k3 took "the active window isn't on the active screen"
+  to mean "the user went to an empty screen", so focus keys walked from the
+  pointer's screen and Alt+H/J/K/L did nothing. **Fixed:** k3 walks from the
+  active window's screen, and uses `activeScreen` only when no window is
+  active.
+- **`slotSwitchTo*Screen` steps from KWin's active screen** (so from the
+  pointer's screen) and wraps around at the end. With the pointer on the
+  target screen, "focus down" onto an empty laptop screen wrapped back to the
+  top monitor. **Fixed:** k3 activates a window on the target screen itself.
+  That's the screen's last-focused tiled window, or else what KWin's own
+  switching would pick: the topmost floating window, or Plasma's desktop
+  window. The slot is only a fallback for a bare KWin, with its direction
+  worked out from KWin's own active screen.
+- **Plasma focuses an empty screen's desktop window** (`plasmashell`, one per
+  screen) when KWin switches to that screen. So focus doesn't linger as it
+  does in a bare KWin. k3 tracks lingering focus explicitly
+  (`strandedFocus`) for the bare case.
+- **No signal for a change in usable area.** Hiding a panel, or a panel
+  reserving its space again, emits nothing a script can see: no workspace
+  signal, and no signal on the panel's window. Windows stayed 20px under a
+  panel that came back. A replug does the same thing. The screen returns
+  first and k3 tiles it without a panel; plasmashell creates the panel about
+  0.7s later. **Fixed:** k3 checks the visible layouts' areas once a second
+  (`QTimer`) and retiles any whose area changed. Idle cost is one
+  `clientArea` call per screen and no geometry changes (none in 90 minutes).
+- **Unplugging (`kscreen-doctor output.eDP-1.disable`):** KWin moves all of
+  the screen's windows, on every desktop, within about 1ms, in stacking
+  order. Each one goes in after the focused window, so a laptop layout
+  `[K2 | K4 | K3]` arrived on the monitor as `[K1 | K4 | K3 | K2]`.
+  plasmashell also recreates the remaining screen's panel. On re-enable,
+  KWin restored the position and scale and moved the windows back.
+- **Per-screen desktops:** KDE's *Window to Next Screen* sets the target
+  screen's desktop itself. Switching desktops on one screen emits one
+  `currentDesktopChanged`. `options.perOutputVirtualDesktopsChanged` exists
+  for scripts, and k3 doesn't need it.
+- **Scaled screen:** at scale 1.2 every geometry is in logical pixels and
+  lands exactly where k3 asks. The gaps and the focus-parent outline are
+  right. Output objects have no `scale` property in scripts, and k3 doesn't
+  need one.
+- **A real cable unplug** (HDMI-A-2, with 7 windows on 4 desktops) looked
+  like `kscreen-doctor`: everything moved to the laptop within 1ms and was
+  tiled there. The laptop's logical position jumped to 0,0. On replug,
+  though, KWin moved only 2 of the 7 windows back: Zotero, whose desktop
+  was hidden and which hadn't applied any geometry since, and System
+  Settings. The other five stayed on the laptop. With `kscreen-doctor`,
+  every window had returned. KWin seems to forget a window's home screen
+  once the window is re-positioned (unconfirmed). So putting layouts back
+  on replug is k3's job (open decision (b), PLAN.md §8).
+- **Obsidian came out of the unplug maximized,** although it was tiled.
+  Neither k3 nor the user maximized it, so KWin or the app did. Its geometry
+  changed while its desktop was hidden, which suggests it runs under
+  XWayland. k3 respects a maximized window, so it stays maximized until
+  you restore it.
+- **Hidden desktops lag after a reload.** Windows on hidden desktops kept
+  their old geometry and maximized state until their desktop was shown.
+  That matches the phase 1 finding. Then they took their tiles: Obsidian
+  and Zotero un-maximized and tiled within about 0.2s of being shown.
+- **Focus onto an empty screen with the pointer on the other screen** works
+  with the final build (Alt+J from the top monitor onto the empty laptop,
+  and back).
+- **Clicking a tab's sliver** activates and raises that tab (checked live).
 
 ### References
 

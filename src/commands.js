@@ -22,6 +22,28 @@ function activate(leaf) {
     workspace.activeWindow = clients.get(leaf.id).window;
 }
 
+// Set when k3 moved KWin to a screen with nothing to focus while the active
+// window stayed behind on another one: { window, from, screen } (output
+// names). Only a bare KWin gets there; Plasma has a desktop window on every
+// screen. Void once that window changes screens; any activation clears it.
+let strandedFocus = null;
+
+// The screen the user is working on: the active window's. KWin's activeScreen
+// isn't: it follows the pointer, which may rest on another screen. It's the
+// fallback when no window is active.
+function userScreen() {
+    const w = workspace.activeWindow;
+    const f = strandedFocus;
+    const stranded = f && f.window === w && w.output.name === f.from && outputNamed(f.screen);
+    return stranded || (w && w.output) || workspace.activeScreen;
+}
+
+// Whether w shows on output while that screen shows desktop.
+function shownOn(w, output, desktop) {
+    return !w.minimized && !!w.output && w.output.name === output.name
+        && (w.onAllDesktops || w.desktops.some(function (d) { return d.id === desktop.id; }));
+}
+
 // Run fn(node, space) on what the commands act on: the selected container,
 // or else the active window's leaf. Nothing happens unless the active window
 // is tiled. Afterwards the outline follows the selection, which a tree change
@@ -75,25 +97,25 @@ function focusChild() {
 }
 
 // At the edge of a screen's layout, focus continues onto the next screen.
-// A focused floating window has nothing tiled to walk from.
+// On an empty screen (Plasma's desktop window is active there, or focus
+// stayed behind elsewhere) it goes straight on to the next one.
 function focusDirection(dir) {
     const c = activeClient();
-    // Focusing an empty screen leaves the last window active elsewhere: walk
-    // from the screen the user is on.
-    if (c && c.window.output.name !== workspace.activeScreen.name) {
-        focusScreen(workspace.activeScreen, dir);
-        return;
+    const screen = userScreen();
+    if (c && c.window.output.name === screen.name) {
+        // A focused floating window has nothing tiled to walk from.
+        if (!c.key) return;
+        let done = false;
+        onTarget(function (node) {
+            const target = neighbor(node, dir);
+            if (target) {
+                activate(focusedLeaf(target));
+                done = true;
+            }
+        });
+        if (done) return;
     }
-    if (c && !c.key) return;
-    let done = false;
-    onTarget(function (node) {
-        const target = neighbor(node, dir);
-        if (target) {
-            activate(focusedLeaf(target));
-            done = true;
-        }
-    });
-    if (!done) focusScreen(c ? c.window.output : workspace.activeScreen, dir);
+    focusScreen(screen, dir);
 }
 
 // At the edge of a screen's layout, the window continues onto the next
@@ -116,21 +138,50 @@ function screenInDirection(output, dir) {
     return i >= 0 ? screens[i] : null;
 }
 
-// Focus the screen next to output: its last focused tiled window. When it has
-// none, or that window is already active (we're coming back from an empty
-// screen), activating does nothing, so move KWin's active screen instead.
+// The window to focus on entering output: its last focused tiled window, or
+// else, as KWin's own screen switching does, the topmost window there that
+// k3 knows (a floating one) or Plasma's desktop window. null if none.
+function screenFocusTarget(output) {
+    const desktop = workspace.currentDesktopForScreen(output);
+    const s = spaces.get(spaceKey(output, desktop));
+    if (s) return clients.get(focusedLeaf(s.root).id).window;
+    const here = workspace.stackingOrder.filter(function (w) {
+        return (w.desktopWindow || clients.has(windowId(w))) && shownOn(w, output, desktop);
+    });
+    return here.length ? here[here.length - 1] : null;
+}
+
+const SWITCH_SCREEN = { left: "slotSwitchToLeftScreen", right: "slotSwitchToRightScreen",
+                        up: "slotSwitchToAboveScreen", down: "slotSwitchToBelowScreen" };
+
+// Make output KWin's active screen. KWin's slots step from its own active
+// screen, which follows the pointer (and wrap around at the end), so the
+// step starts from there.
+function switchKWinScreen(output) {
+    const from = workspace.activeScreen;
+    const dir = Object.keys(SWITCH_SCREEN).find(function (d) {
+        const o = screenInDirection(from, d);
+        return o && o.name === output.name;
+    });
+    if (dir) workspace[SWITCH_SCREEN[dir]]();
+}
+
+// Focus the screen next to output by activating a window there. Only when
+// there's none (a bare KWin has no desktop window), or it's already active
+// (back from such a screen), move KWin's active screen instead; focus then
+// stays behind on the old screen.
 function focusScreen(output, dir) {
     const next = screenInDirection(output, dir);
     if (!next) return;
-    const s = spaces.get(spaceKey(next, workspace.currentDesktopForScreen(next)));
-    const leaf = s && focusedLeaf(s.root);
-    if (leaf && !clients.get(leaf.id).window.active) {
-        activate(leaf);
+    const target = screenFocusTarget(next);
+    if (target && !target.active) {
+        workspace.activeWindow = target;
         return;
     }
-    const slot = { left: "slotSwitchToLeftScreen", right: "slotSwitchToRightScreen",
-                   up: "slotSwitchToAboveScreen", down: "slotSwitchToBelowScreen" }[dir];
-    workspace[slot]();
+    const before = workspace.activeWindow;
+    switchKWinScreen(next);
+    strandedFocus = before && workspace.activeWindow === before && before.output.name !== next.name
+        ? { window: before, from: before.output.name, screen: next.name } : null;
 }
 
 // Send the active tiled window to the screen next to it, onto the desktop
@@ -205,7 +256,8 @@ function toggleFloating() {
 // centered.
 function floatGeometry(c) {
     const r = c.floatRect;
-    const area = workspace.clientArea(KWin.MaximizeArea, c.window.output, workspace.currentDesktop);
+    const output = c.window.output;
+    const area = workspace.clientArea(KWin.MaximizeArea, output, workspace.currentDesktopForScreen(output));
     if (r.width < area.width * 0.9 || r.height < area.height * 0.9) return r;
     const width = Math.round(area.width * 2 / 3);
     const height = Math.round(area.height * 2 / 3);
@@ -221,13 +273,12 @@ function floatGeometry(c) {
 // the current workspace.
 function focusModeToggle() {
     const c = activeClient();
-    const output = workspace.activeScreen;
+    const output = userScreen();
     const desktop = workspace.currentDesktopForScreen(output);
     if (c && c.key) {
         const untiled = workspace.stackingOrder.filter(function (w) {
             const other = clients.get(windowId(w));
-            return other && !other.key && !w.minimized && w.output.name === output.name
-                && (w.onAllDesktops || w.desktops.some(function (d) { return d.id === desktop.id; }));
+            return other && !other.key && shownOn(w, output, desktop);
         });
         if (untiled.length) workspace.activeWindow = untiled[untiled.length - 1];
     } else {

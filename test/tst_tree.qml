@@ -578,6 +578,30 @@ TestCase {
         compare(Tree.nearestInDirection(screens[1], screens, "right"), 3)
     }
 
+    function test_nearest_screen_stacked_and_offset() {
+        // The dev machine: a 1920x1080 monitor above a laptop at scale 1.2
+        // (1600x900 logical), shifted 145px right. They only have each other
+        // up and down.
+        const screens = [rect(0, 0, 1920, 1080), rect(145, 1080, 1600, 900)]
+        compare(Tree.nearestInDirection(screens[0], screens, "down"), 1)
+        compare(Tree.nearestInDirection(screens[1], screens, "up"), 0)
+        compare(Tree.nearestInDirection(screens[0], screens, "up"), -1)
+        compare(Tree.nearestInDirection(screens[1], screens, "down"), -1)
+        compare(Tree.nearestInDirection(screens[1], screens, "left"), -1)
+        compare(Tree.nearestInDirection(screens[1], screens, "right"), -1)
+    }
+
+    function test_same_rect_needs_two_equal_rects() {
+        verify(Tree.sameRect(rect(145, 1110, 1600, 870), rect(145, 1110, 1600, 870)))
+        // A panel hidden: the area grows by its 30px.
+        verify(!Tree.sameRect(rect(145, 1080, 1600, 900), rect(145, 1110, 1600, 870)))
+        verify(!Tree.sameRect(rect(0, 0, 10, 10), rect(0, 0, 10, 11)))
+        // Nothing laid out yet, or the output is gone: never the same.
+        verify(!Tree.sameRect(null, rect(0, 0, 10, 10)))
+        verify(!Tree.sameRect(rect(0, 0, 10, 10), undefined))
+        verify(!Tree.sameRect(null, null))
+    }
+
     function test_resize_skips_tabbed_and_reports_missing_axis() {
         const root = build("splith", ["a", ["tabbed", "b", "c"]])
         verify(Tree.resizeNode(find(root, "b"), "h", 0.1))

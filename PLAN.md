@@ -4,8 +4,9 @@ k3 is an i3-style manual tiling window manager for KDE Plasma 6 on Wayland. It
 is built as a single KWin script, and its keybindings live in **System Settings →
 Keyboard → Shortcuts → KWin**.
 
-Target: Plasma/KWin 6.8.2, Qt 6.12, Wayland. This is the dev machine; it has one
-screen and 11 named virtual desktops.
+Target: Plasma/KWin 6.8.2, Qt 6.12, Wayland. This is the dev machine. It has
+two screens (a monitor above a laptop screen scaled to 120%) and 11 named
+virtual desktops.
 
 ---
 
@@ -70,7 +71,7 @@ screen and 11 named virtual desktops.
 | Multi-monitor: tree per screen, focus/move across screens | Find the neighboring output from output geometry. Uses `workspace.sendClientToScreen`, `outputChanged`, and output hotplug. |
 | Per-screen workspaces (i3: each workspace lives on one output) | Plasma 6.7+ has an opt-in setting, *Switch desktops independently for each screen* (Wayland only). The set of desktops is still shared across screens. k3 calls `workspace.currentDesktopForScreen(output)`, so it works with the setting on or off. |
 | Showing which container is selected (focus parent) | `workspace.showOutline(x, y, w, h)` / `hideOutline()`. It persists until hidden and animates when given a new rect. Phase 0 saw an opaque gray fill. In phase 3 it drew as KWin's translucent quick-tile preview (Plasma's `widgets/translucentbackground`), washing over the selected container. Live it looks fine, but it **swallows mouse clicks**. So any pointer movement (`workspace.cursorPosChanged`) ends the selection and hides the outline, and the click goes through. |
-| Focusing an empty screen | KWin focus is per window, but `workspace.slotSwitchToLeftScreen` / `…Right…` / `…Above…` / `…Below…` exist (confirmed in phase 0), so k3 can move the active screen even when it has no windows |
+| Focusing an empty screen | KWin focus is per window. In Plasma every screen has a desktop window, and k3 activates that. `workspace.slotSwitchToLeftScreen` / `…Right…` / `…Above…` / `…Below…` (confirmed in phase 0) step from KWin's active screen, which follows the pointer, so k3 only uses them in a bare KWin (phase 4, real monitors) |
 | Window lifecycle edge cases | Apps that open maximized, min-size limits bigger than their tile, Wayland apps that set `app_id` late, transients that turn into normal windows |
 | Dragging a tiled window with the mouse | v1: the window snaps back on `interactiveMoveResizeFinished`. Drop-to-reposition and mouse resize that updates ratios go in the backlog. |
 | Feedback for split direction and tab position (i3 shows these with borders) | Optional: Plasma OSD over D-Bus (`org.kde.osdService.showText`, confirmed present on this machine) |
@@ -198,6 +199,7 @@ reachable through the qualifier (`test/tst_engine.qml` guards this).
 | `w.fullScreenChanged`, `w.maximizedChanged` | Exclude or include the leaf, then retile |
 | `w.interactiveMoveResizeFinished` | Retile so the window snaps back. Mouse sync is in the backlog. |
 | `workspace.currentDesktopChanged`, `screensChanged`, `virtualScreenGeometryChanged` | Retile the visible roots |
+| every second (`QTimer`) | Retile each visible root whose usable area (`clientArea`) differs from the one it was last laid out in. KWin has no signal for a panel appearing, hiding or changing size (phase 4, real monitors). |
 
 **Applying geometry**: k3 skips a window only if it's within a pixel of its
 target *and* the target is what k3 last requested for it (`lastRect`).
@@ -237,13 +239,22 @@ them.
   axis matches the direction (`splith` or `tabbed` for left/right, `splitv` for
   up/down) and that has a sibling in that direction. Then walk down that
   sibling's focus stack to a leaf and activate it.
+  - **Which screen the user is on:** the active window's (`userScreen`), not
+    `workspace.activeScreen`, which follows the pointer. That's only the
+    fallback when no window is active.
   - **Edge of the screen's layout:** go to the screen next to it in that
     direction (`nearestInDirection` on the screen geometries) and activate
     its last-focused tiled window.
-  - **Empty target screen,** or a target window that's already active:
-    move KWin's active screen with `slotSwitchTo{Left,Right,Above,Below}Screen`.
-  - **The user is on an empty screen** while a window elsewhere is still
-    active (KWin leaves it active): walk from the active screen instead.
+  - **Empty target screen:** activate what KWin's own screen switching
+    would: the topmost floating window there, or Plasma's desktop window.
+  - **Nothing to activate** (a bare KWin has no desktop window), or the
+    target is already active: move KWin's active screen with
+    `slotSwitchTo{Left,Right,Above,Below}Screen`. The direction is worked
+    out from KWin's own active screen, since that's where the slot steps
+    from. The window left active elsewhere is remembered (`strandedFocus`),
+    and focus keys walk on from the empty screen.
+  - **The user is on an empty screen** (Plasma's desktop window is active,
+    or focus was stranded): go straight on to the next screen.
   - **A floating window is focused:** do nothing.
 - **move ⟨dir⟩**:
   - If the sibling in that direction (in a parent on the matching axis) is a
@@ -509,8 +520,8 @@ session and live by you)
   merge back. With 2 tabs, pop-out leaves a plain split. Focus changes cause
   no geometry churn.
 
-**Phase 4: multi-monitor** ✅ built 2026-11-02 and verified on the nested
-session's two virtual screens; the real two-monitor check is still to do
+**Phase 4: multi-monitor** ✅ built 2026-11-02, verified on the nested
+session's two virtual screens, then on real monitors the same day
 - Per-output roots (since phase 1), now with focus/move across screens at the
   layout's edges, KDE's *Window to Next Screen*, hotplug, and both
   per-screen desktop modes.
@@ -528,10 +539,63 @@ session's two virtual screens; the real two-monitor check is still to do
     re-tile on the other screen and then return);
   - per-screen desktops: a moved window lands on the desktop the target
     screen shows.
-- **Still open:**
-  - real monitors (different sizes and scaling, panels, a true unplug);
-  - a re-homed window's left-to-right order isn't preserved on unplug;
-  - should a selected container cross screens?
+- **Real monitors** (README → "Phase 4 findings"): a 1920×1080 monitor
+  above a laptop screen at scale 1.2 (1600×900 logical, offset 145px), each
+  with a top panel.
+  - ✅ Verified:
+    - focus across screens both ways, onto an empty screen and back, with
+      each screen's last-focused window remembered; the side edges (no
+      screen there) do nothing;
+    - move to the next screen after its focused window; a selected
+      container stops at the edge;
+    - KDE's *Window to Next Screen* both ways;
+    - gaps and usable areas on both screens; nothing overlaps a panel,
+      including after a panel hides and returns;
+    - unplug and replug with `kscreen-doctor output.eDP-1.disable` /
+      `.enable`;
+    - per-screen desktops on and off;
+    - on the scaled screen: accordion slivers, reorder and pop-out; the
+      focus-parent outline (exact, and the mouse ends it); floating; focus
+      tiled/floating; fullscreen; maximize;
+    - zero geometry changes while idle;
+    - clicking a tab's sliver switches to it.
+  - Offset-stacked and diagonal arrangements were also tested on the nested
+    session's screens (moved with `kscreen-doctor … position`). 2 new tests
+    (70 tree tests in all).
+  - **Fixed** (none of these show on virtual screens: no pointer, no
+    panels):
+    - focus keys walked from KWin's active screen, which follows the
+      pointer, so they stopped working when the mouse rested on the other
+      monitor;
+    - focusing an empty screen used `slotSwitchTo*Screen`, which steps from
+      the pointer's screen and wraps around;
+    - k3 didn't notice usable-area changes, so windows stayed under a panel
+      that came back (also after every replug). Now checked once a second.
+    - Smaller fix: floating geometry and *Focus Tiled/Floating* used the
+      global current desktop or active screen instead of the window's own.
+- **Follow-up tests:**
+  - ✅ With the final build, Alt+J onto an empty screen and back, with the
+    pointer on the other screen.
+  - ✅ Windows on a hidden desktop take their tiles once it's shown after a
+    reload, including un-maximizing.
+  - ⚠️ A real HDMI cable unplug: every window was tiled on the laptop. On
+    replug, KWin moved only 2 of 7 windows back, while `kscreen-doctor` had
+    returned all. Feeds decision (b) below.
+- **Not tested yet:**
+  - a side-by-side arrangement on real monitors;
+  - turning per-screen desktops off while the screens show different
+    desktops.
+- **Still open** (decisions):
+  - Should a selected container be able to move to another screen (i3
+    allows it)? It stops at the edge now.
+  - On unplug, should windows keep their left-to-right order? KWin hands
+    them over in stacking order, and each goes right after the focused
+    window, so they end up in reverse stacking order, whatever their layout
+    was: `[K2 | K4 | K3]` became `[K1 | K4 | K3 | K2]`. Containers are lost
+    both ways, and after a real replug KWin doesn't return every window.
+
+  You decided yes to both (2026-11-02). They're built after this phase's
+  commit.
 
 **Phase 5: settings and polish**
 - `contents/config/main.xml` and `contents/ui/config.ui` for the §5.6 keys

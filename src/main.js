@@ -51,6 +51,7 @@ start();
 // mouse does: KWin's outline swallows clicks, so reaching for the mouse ends
 // the selection and lets the click through.
 workspace.windowActivated.connect(guarded(clearSelection));
+workspace.windowActivated.connect(guarded(function () { strandedFocus = null; }));
 workspace.currentDesktopChanged.connect(guarded(clearSelection));
 workspace.cursorPosChanged.connect(guarded(clearSelection));
 log("loaded, build", K3_BUILD);
