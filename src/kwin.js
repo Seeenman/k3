@@ -126,6 +126,16 @@ function retile(s) {
     });
 }
 
+// Tabs share one rect, so stacking decides what shows, and KWin raises only
+// the window it activates. Raise the whole tab c's window shows in, so a
+// container tab ([B / C]) shows all of itself above the hidden tabs; inner
+// hidden tabs go first, so their slivers stay visible (raiseOrder).
+function raiseTab(c) {
+    const tab = c && c.key && shownTab(c.leaf);
+    if (!tab) return;
+    raiseOrder(tab).forEach(function (l) { workspace.raiseWindow(clients.get(l.id).window); });
+}
+
 function retileClient(c) {
     if (c.key) retile(spaces.get(c.key));
 }
@@ -367,6 +377,7 @@ function start() {
         focusNode(c.leaf);
         // A tabbed layout depends on which tab is focused.
         retile(spaces.get(c.key));
+        raiseTab(c);
     }));
     workspace.windowAdded.connect(guarded(addWindow));
     workspace.windowRemoved.connect(guarded(removeWindow));

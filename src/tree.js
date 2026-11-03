@@ -311,6 +311,27 @@ function resizeNode(node, axis, delta) {
     return true;
 }
 
+// --- stacking tabs ----------------------------------------------------------
+// Tabs share one rect, so the stacking order decides what shows.
+
+// The tab leaf shows in: the visible child of its outermost tabbed ancestor
+// (after focusNode(leaf)), or null when no tabbed container holds it.
+function shownTab(leaf) {
+    let tab = null;
+    for (let n = leaf; n.parent; n = n.parent)
+        if (n.parent.layout === "tabbed") tab = n;
+    return tab;
+}
+
+// node's leaves in the order to raise them so the right ones end up on top:
+// in each tabbed container the hidden tabs first, then the visible one.
+function raiseOrder(node) {
+    if (node.type === "leaf") return [node];
+    const kids = node.layout !== "tabbed" ? node.children
+        : node.children.filter(function (c) { return c !== node.focus[0]; }).concat([node.focus[0]]);
+    return kids.reduce(function (acc, c) { return acc.concat(raiseOrder(c)); }, []);
+}
+
 // --- placing new nodes ------------------------------------------------------
 // geometry is { area, gapsInner, gapsOuter, tabPadding }: what layoutRects
 // needs to know a window's current shape.

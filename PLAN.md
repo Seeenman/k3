@@ -310,6 +310,12 @@ them.
     `tabPadding` further out behind it, so a sliver of them shows. All tabs
     keep one size. k3 retiles on every activation so the slivers follow
     focus.
+  - **Stacking:** tabs share one rect, so the visible tab has to be on top.
+    KWin raises only the window it activates, so k3 raises the whole tab
+    that window is in (`raiseTab`), on activation, after Toggle Tabbed and
+    after moves. That matters when the tab is a container (`[B / C]`). In
+    each tabbed container the hidden tabs are raised first, then the
+    visible one (`raiseOrder`).
   - **Move along the direction:** reorders tabs. Past the first or last tab,
     the tab *pops out*: the tabs' place is split along the move direction
     (`wrap`) with the tab on that side. The remaining tabs then run the other

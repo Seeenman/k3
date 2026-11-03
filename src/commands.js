@@ -128,7 +128,11 @@ function moveDirection(dir) {
             done = true;
         }
     });
-    if (done) return;
+    if (done) {
+        // A move can bring the window into tabs, or change the tab shown.
+        raiseTab(activeTiled());
+        return;
+    }
     if (selection) moveSelectionToScreen(dir);
     else moveToScreen(dir);
 }
@@ -230,9 +234,9 @@ function toggleTabbedLayout() {
     onTarget(function (node, s) {
         toggleTabbed(node);
         retile(s);
-        // Tabs share one rect: keep the focused one on top.
-        workspace.raiseWindow(workspace.activeWindow);
     });
+    // Tabs share one rect: the focused tab goes on top, all of it.
+    raiseTab(activeTiled());
 }
 
 // Switch the active window's screen-and-desktop between a binary tree and

@@ -591,6 +591,31 @@ TestCase {
         compare(Tree.nearestInDirection(screens[1], screens, "right"), -1)
     }
 
+    // --- stacking tabs ---------------------------------------------------------
+
+    function test_shown_tab_is_the_outermost_tabs_visible_child() {
+        const root = build("splith", ["x", ["tabbed", "a", ["splitv", "b", ["tabbed", "c", "d"]]]])
+        Tree.focusNode(find(root, "d"))
+        compare(shape(Tree.shownTab(find(root, "d"))), "splitv(b,tabbed(c,d))")
+        compare(shape(Tree.shownTab(find(root, "b"))), "splitv(b,tabbed(c,d))")
+        compare(Tree.shownTab(find(root, "x")), null)
+        Tree.focusNode(find(root, "a"))
+        compare(Tree.shownTab(find(root, "a")).id, "a")
+    }
+
+    function test_raise_order_puts_hidden_tabs_first() {
+        // [A | [B / C]] turned into tabs, with [B / C] shown: both B and C go
+        // on top of A.
+        const tabs = build("tabbed", ["a", ["splitv", "b", "c"]])
+        Tree.focusNode(find(tabs, "b"))
+        compare(Tree.raiseOrder(Tree.shownTab(find(tabs, "b"))).map(l => l.id), ["b", "c"])
+        // Nested tabs: c is hidden behind d, so it goes before d.
+        const root = build("splith", ["x", ["tabbed", "a", ["splitv", "b", ["tabbed", "c", "d"]], "e"]])
+        Tree.focusNode(find(root, "d"))
+        compare(Tree.raiseOrder(Tree.shownTab(find(root, "d"))).map(l => l.id), ["b", "c", "d"])
+        compare(Tree.raiseOrder(root).map(l => l.id), ["x", "a", "e", "b", "c", "d"])
+    }
+
     // --- binary tree and moving subtrees --------------------------------------
 
     function geometry() { return { area: rect(0, 0, 1600, 900), gapsInner: 0, gapsOuter: 0, tabPadding: 0 } }

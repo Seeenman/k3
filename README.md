@@ -191,6 +191,9 @@ accordion rather than i3's tabbed layout.
 
 - **One tab is visible.** 30px slivers of the others peek out beside it
   (`tabPadding`). There's no tab bar.
+- **A tab can hold several windows.** In `[A | [B / C]]`, Alt+, on A makes
+  two tabs, A and `[B / C]`. Switching to the second shows B and C
+  together.
 - **The direction follows the position.** Tabs that fill the screen run
   left/right (Alt+H/L switch them). Tabs next to another window run the other
   way: in `[A | tabs]`, Alt+H/L go between A and the tabs, and Alt+J/K step
@@ -808,6 +811,16 @@ Moving windows between screens:
   next window that crossed over went next to the old focused window there.
   `moveSubtree` now marks the active window as its new layout's focused
   one, as `attachClient` does.
+
+Tabs:
+- **Stacking decides which tab shows,** because tabs share one rect. KWin
+  raises only the window it activates. So with tabs A and `[B / C]`,
+  Alt+L raised B (or C) alone, and the other half of the tab stayed hidden
+  behind A. **Fixed:** on activation, after Toggle Tabbed and after a move,
+  k3 raises the whole tab the window is in (`raiseTab`). In each tabbed
+  container it raises the hidden tabs first and the visible one last
+  (`raiseOrder`), so tabs nested in a tab keep their slivers above the
+  outer hidden tabs.
 
 Binary tree:
 - **Adopting builds a row, then rebuilds it.** At startup k3 adopts windows
