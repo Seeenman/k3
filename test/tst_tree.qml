@@ -591,6 +591,117 @@ TestCase {
         compare(Tree.nearestInDirection(screens[1], screens, "right"), -1)
     }
 
+    // --- binary tree and moving subtrees --------------------------------------
+
+    function geometry() { return { area: rect(0, 0, 1600, 900), gapsInner: 0, gapsOuter: 0, tabPadding: 0 } }
+    function btreeRoot(specs) {
+        const root = build("splith", specs)
+        root.btree = true
+        return root
+    }
+
+    function test_place_i3_goes_after_focused() {
+        const root = build("splith", ["a", "b", "c"])
+        Tree.focusNode(find(root, "b"))
+        Tree.placeNode(root, Tree.newLeaf("d"), geometry())
+        compare(shape(root), "splith(a,b,d,c)")
+    }
+
+    function test_place_btree_halves_focused_along_longer_side() {
+        const root = btreeRoot(["a"])
+        Tree.placeNode(root, Tree.newLeaf("b"), geometry())        // a is wide: beside
+        compare(shape(root), "splith(a,b)")
+        Tree.focusNode(find(root, "b"))
+        Tree.placeNode(root, Tree.newLeaf("c"), geometry())        // b is 800x900: below
+        compare(shape(root), "splith(a,splitv(b,c))")
+        Tree.focusNode(find(root, "c"))
+        Tree.placeNode(root, Tree.newLeaf("d"), geometry())        // c is 800x450: beside
+        compare(shape(root), "splith(a,splitv(b,splith(c,d)))")
+        Tree.focusNode(find(root, "a"))
+        Tree.placeNode(root, Tree.newLeaf("e"), geometry())        // the focused one, not the newest
+        compare(shape(root), "splith(splitv(a,e),splitv(b,splith(c,d)))")
+        fuzzyWeights(root.weights, [0.5, 0.5])
+    }
+
+    function test_place_btree_respects_tabs_and_explicit_split() {
+        const root = btreeRoot(["a", ["tabbed", "b", "c"]])
+        Tree.focusNode(find(root, "c"))
+        Tree.placeNode(root, Tree.newLeaf("d"), geometry())        // a new tab
+        compare(shape(root), "splith(a,tabbed(b,c,d))")
+        Tree.focusNode(find(root, "a"))
+        Tree.splitNode(find(root, "a"), "splith")                  // a is tall, but the user said beside
+        Tree.placeNode(root, Tree.newLeaf("e"), geometry())
+        compare(shape(root), "splith(splith(a,e),tabbed(b,c,d))")
+        // Without geometry, a binary tree places like i3.
+        const other = btreeRoot(["x", "y"])
+        Tree.placeNode(other, Tree.newLeaf("z"), null)
+        compare(shape(other), "splith(x,z,y)")
+    }
+
+    function test_place_into_empty_root_hands_over_the_content() {
+        const root = Tree.newRoot("splith", true)
+        const moved = node(["tabbed", "a", "b"])
+        Tree.placeNode(root, moved, geometry())
+        compare(shape(root), "tabbed(a,b)")
+        compare(root.btree, true)
+        compare(find(root, "a").parent, root)
+        compare(moved.parent, null)
+    }
+
+    function test_commands_on_a_whole_workspace() {
+        // A selection can become a whole root (moved onto an empty screen).
+        const root = build("splith", ["a", "b"])
+        verify(!Tree.moveNode(root, "left"))
+        verify(!Tree.moveNode(root, "down"))
+        compare(Tree.neighbor(root, "right"), null)
+        Tree.toggleSplit(root)
+        compare(shape(root), "splitv(a,b)")
+        Tree.toggleTabbed(root)
+        compare(shape(root), "tabbed(a,b)")
+        Tree.splitNode(root, "splitv")
+        compare(shape(root), "tabbed(a,b)")
+        verify(!Tree.resizeNode(root, "h", 0.1))
+    }
+
+    function test_rebuild_as_binary_tree_and_back_keeps_order_and_focus() {
+        const root = build("splith", ["a", ["tabbed", "b", "c"], "d"])
+        Tree.focusNode(find(root, "c"))
+        Tree.rebuildLayout(root, true, geometry())
+        compare(shape(root), "splith(a,splitv(b,splith(c,d)))")
+        compare(ids(root), ["a", "b", "c", "d"])
+        compare(root.btree, true)
+        compare(Tree.focusedLeaf(root).id, "c")
+        Tree.rebuildLayout(root, false, geometry())
+        compare(shape(root), "splith(a,b,c,d)")
+        fuzzyWeights(root.weights, [0.25, 0.25, 0.25, 0.25])
+        compare(root.btree, false)
+        compare(Tree.focusedLeaf(root).id, "c")
+    }
+
+    function test_take_content_empties_root() {
+        const root = build("splitv", ["a", ["splith", "b", "c"]])
+        root.btree = true
+        Tree.focusNode(find(root, "b"))
+        const content = Tree.takeContent(root)
+        compare(shape(content), "splitv(a,splith(b,c))")
+        compare(content.parent, null)
+        compare(find(content, "a").parent, content)
+        compare(Tree.focusedLeaf(content).id, "b")
+        compare(root.children.length, 0)
+        compare(root.btree, true)
+        const single = build("splith", ["x"])
+        compare(Tree.takeContent(single).id, "x")
+        compare(single.children.length, 0)
+    }
+
+    function test_common_ancestor() {
+        const root = build("splith", ["a", ["splitv", "b", ["splith", "c", "d"]]])
+        compare(shape(Tree.commonAncestor([find(root, "c"), find(root, "d")])), "splith(c,d)")
+        compare(shape(Tree.commonAncestor([find(root, "b"), find(root, "d")])), "splitv(b,splith(c,d))")
+        compare(Tree.commonAncestor([find(root, "a"), find(root, "d")]), root)
+        compare(Tree.commonAncestor([find(root, "b")]).id, "b")
+    }
+
     function test_same_rect_needs_two_equal_rects() {
         verify(Tree.sameRect(rect(145, 1110, 1600, 870), rect(145, 1110, 1600, 870)))
         // A panel hidden: the area grows by its 30px.

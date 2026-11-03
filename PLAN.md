@@ -31,7 +31,7 @@ virtual desktops.
 |---|---|---|
 | Positioning engine | k3 keeps its own i3-style tree and sets `window.frameGeometry` | KWin's native Tile API (Meta+T) is not used. k3 clears `window.tile` on any window it manages. |
 | Code structure | Several files in `src/`, concatenated by `make` into `package/contents/code/main.js` | KWin JS scripts load one file, so `make` does the concatenation. |
-| New windows | i3 default | A new window goes after the focused window in the focused window's container. |
+| New windows | Binary tree by default (revised 2026-11-02; was i3's) | A new window halves the focused one along its longer side, as in bspwm. With `defaultLayout=split`, or after Alt+Shift+T, it goes after the focused window in its container (i3). See §5.5. |
 | KDE built-ins | Reuse them | Your existing desktop, close and fullscreen bindings keep working. |
 | Mod key / directions | **Alt** + h/j/k/l | Alt is already your mod key for desktops. |
 | Decorations | Keep KDE titlebars | The active titlebar color shows which window has focus. k3 never sets `noBorder`. |
@@ -134,7 +134,9 @@ reachable through the qualifier (`test/tst_engine.qml` guards this).
 
 - **Workspace root**: one per *(output, desktop)*, keyed by
   `output.name + "|" + desktop.id`. This is the equivalent of an i3 workspace.
-  Roots are created lazily and dropped when empty.
+  Roots are created lazily (in `defaultLayout`) and dropped when empty. A
+  root's `btree` flag makes it a binary tree workspace: a new window halves
+  the focused one (`placeNode`).
 - **Container**: `{ layout: "splith" | "splitv" | "tabbed", children[], weights[],
   focus[] }`
   - `weights` are fractions along the split axis that sum to 1.
@@ -145,6 +147,8 @@ reachable through the qualifier (`test/tst_engine.qml` guards this).
     switch back.
 - **Leaf**: `{ windowId }`. Floating windows are not in the tree; k3 keeps them
   in a separate set.
+- **Home screen**: a window evacuated from an unplugged screen remembers its
+  name (`client.home`), so k3 can put it back on replug (§5.4).
 - **Selection**: each root has a `selected` node. Normally it's the focused leaf;
   focus parent/child moves it.
 - Default root layout: `splith`.
@@ -190,15 +194,16 @@ reachable through the qualifier (`test/tst_engine.qml` guards this).
 
 | Signal | What k3 does |
 |---|---|
-| startup | Adopt existing windows (`workspace.windowList()`) into one `splith` root per (output, desktop). Retiling is held back until all windows are adopted, then each root is retiled once. |
+| startup | Adopt existing windows (`workspace.windowList()`) into one `splith` root per (output, desktop). Retiling is held back until all windows are adopted. Then each binary tree root is rebuilt once (`rebuildLayout`), and each root is retiled once. |
 | `workspace.windowAdded` | Classify the window. If it should be tiled: un-maximize it if it opened maximized, release it from KWin tiling (`w.tile.unmanage(w)`), insert it after the focused leaf in its root, retile. Connect its per-window signals. |
 | `workspace.windowRemoved` | Remove the leaf, normalize, retile. KWin has already activated the next window in its most-recently-used order (phase 1 found it does this *before* `windowRemoved`), which matches i3, so k3 adds nothing. |
 | `workspace.windowActivated` | Update focus stacks up the tree, reset the selection to the leaf, raise the leaf if it's in a tabbed container (covers Alt+Tab and taskbar clicks) |
-| `w.desktopsChanged`, `w.outputChanged`, `w.minimizedChanged` | `sync()`: work out which root the window belongs in now. That's none while it's floating, minimized, or on several or all desktops. If it changed, move the leaf there: remove it from the old root, insert it after the focused leaf of the new one, and retile both. This covers KDE's *Window to Desktop N*, *Window to Next Screen*, *Keep on All Desktops* and output hotplug. |
+| `w.desktopsChanged`, `w.minimizedChanged` | `sync()`: work out which root the window belongs in now. That's none while it's floating, minimized, or on several or all desktops. If it changed, move the leaf there: remove it from the old root, place it next to the focused leaf of the new one (`placeNode`), and retile both. This covers KDE's *Window to Desktop N* and *Keep on All Desktops*. |
+| `w.outputChanged` | The same `sync()`, but from a 0ms single-shot `QTimer`, after KWin's burst of changes (`flushSyncs`). First `rehome()`. **Unplug:** each layout whose screen is gone moves whole (`moveSubtree`) next to the focused window where KWin put its windows, which remember that screen (`home`). **Replug:** windows whose home is back are moved there by k3, as the smallest subtree that holds just them. KWin returns only some itself. Then the syncs, then a retile of every layout a window entered: `sendClientToScreen` takes effect only when the client answers. This covers KDE's *Window to Next Screen* and hotplug. |
 | `w.tileChanged` | KDE quick-tiled a tiled window (e.g. Meta+arrow): release it and retile, so it snaps back |
 | `w.fullScreenChanged`, `w.maximizedChanged` | Exclude or include the leaf, then retile |
 | `w.interactiveMoveResizeFinished` | Retile so the window snaps back. Mouse sync is in the backlog. |
-| `workspace.currentDesktopChanged`, `screensChanged`, `virtualScreenGeometryChanged` | Retile the visible roots |
+| `workspace.currentDesktopChanged`, `screensChanged`, `virtualScreenGeometryChanged` | Retile the visible roots. `screensChanged` also runs `flushSyncs`, so a replugged screen gets its windows back even if KWin returned none. Retile skips any window that's on another screen than its root: it's in transit, and tiling it would pull it back. |
 | every second (`QTimer`) | Retile each visible root whose usable area (`clientArea`) differs from the one it was last laid out in. KWin has no signal for a panel appearing, hiding or changing size (phase 4, real monitors). |
 
 **Applying geometry**: k3 skips a window only if it's within a pixel of its
@@ -271,7 +276,25 @@ them.
     next to it (`sendClientToScreen`). Then put it on the desktop that screen
     shows, since that can differ with per-screen desktops. `sync()` inserts
     it after that screen's focused window.
-  - A selected container doesn't cross screens; it stops at the edge.
+  - A selected container crosses screens too, whole (`moveSubtree`): k3
+    places the subtree, then KWin moves its windows while `sync()` is held
+    off (`holdSync`). On an empty screen the root takes over its content, and
+    the selection becomes that root. A whole-root selection only moves on to
+    other screens: `moveNode` treats it as being at every edge, and split,
+    the layout toggles and focus parent act on the root itself or do
+    nothing.
+- **Placing a new window** (or a subtree moved in), `placeNode`:
+  - In a binary tree root, it halves the focused leaf: it goes second in a
+    new two-way split, beside the leaf if the leaf's rect is wider than
+    tall, else below it. A lone child just re-orients its parent.
+  - In a split root (i3), or when the focused leaf's container is tabbed or
+    was just split by the user (`pendingSplit`), it goes after the focused
+    leaf.
+  - Into an empty root, a container's content becomes the root's.
+- **toggle binary tree** (Alt+Shift+T): rebuild the root from its leaves in
+  their current order (`rebuildLayout`), either as a binary tree (each leaf
+  halving the one before it) or as one row. Containers and tabs are dropped,
+  and the focused leaf stays focused.
 - **split h / split v**: if the parent has one child, just change its layout.
   Otherwise wrap the selected node in a new container (`pendingSplit`).
 - **layout toggle split**: flip the parent between `splith` and `splitv`.
@@ -336,8 +359,9 @@ They're hard-coded defaults until phase 5 adds the settings dialog.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `gapsInner` | 4 | px between tiles (your KWin tile padding is 4) |
-| `gapsOuter` | 4 | px between tiles and the screen edge |
+| `defaultLayout` | `"btree"` | how a root starts: `btree` (binary tree) or `split` (i3 placement) |
+| `gapsInner` | 10 | px between tiles |
+| `gapsOuter` | 10 | px between tiles and the screen edge |
 | `floatClasses` | `"spectacle,org.kde.polkit-kde-authentication-agent-1,…"` | comma-separated window classes that always float |
 | `ignoreClasses` | `"plasmashell,krunner,ksmserver-logout-greeter,…"` | window classes k3 never touches |
 | `resizeStep` | 5 | % of the parent per resize keypress |
@@ -378,6 +402,7 @@ browser Alt+D. So the less frequent k3 commands default to **Alt+Shift+letter**.
 | Split vertical (`k3-split-v`) | `split v` | Alt+Shift+V | |
 | Toggle split direction (`k3-layout-toggle-split`) | `layout toggle split` | Alt+/ (AeroSpace's `alt-slash`; was Alt+Shift+T) | Emacs M-/ |
 | Toggle tabbed (`k3-layout-tabbed`) | `layout tabbed` | Alt+, (AeroSpace's `alt-comma`; was Alt+Shift+W) | Emacs M-, |
+| Toggle binary tree (`k3-layout-btree`) | (bspwm-style tiling) | Alt+Shift+T ("tree"; freed when toggle split moved to Alt+/) | |
 | Toggle floating (`k3-float-toggle`) | `floating toggle` | Alt+Shift+Space | |
 | Focus tiled ↔ floating (`k3-focus-mode-toggle`) | `focus mode_toggle` | *(none)* | Alt+Space is KRunner |
 | Focus parent (`k3-focus-parent`) | `focus parent` | Alt+Shift+U ("up") | |
@@ -594,8 +619,44 @@ session's two virtual screens, then on real monitors the same day
     was: `[K2 | K4 | K3]` became `[K1 | K4 | K3 | K2]`. Containers are lost
     both ways, and after a real replug KWin doesn't return every window.
 
-  You decided yes to both (2026-11-02). They're built after this phase's
-  commit.
+  You decided yes to both (2026-11-02). Both are built: see the next
+  milestone.
+
+**Binary tree layout and moving between screens (added after phase 4, at
+your request)** ✅ 2026-11-02 (verified in the nested session, then live on
+both screens, including a real cable unplug)
+- `tree.js`:
+  - `placeNode`, the binary tree split (`splitBeside`) and `rebuildLayout`;
+  - `takeContent` and `commonAncestor`;
+  - guards for a whole-root node.
+
+  8 new tests (78 tree tests in all).
+- `kwin.js`:
+  - `spaceFor` (roots start in `defaultLayout`);
+  - `moveSubtree`;
+  - deferred screen changes (`scheduleSync` / `flushSyncs`);
+  - `rehome` (`evacuate`, `restoreHomes`);
+  - the in-transit guard in `retile`.
+- `commands.js`: `moveSelectionToScreen` and `toggleBinaryTree`.
+  `main.js`: Alt+Shift+T. `config.js`: `defaultLayout`.
+- ✅ Verified live:
+  - new windows halve the focused one (on the scaled screen too), and
+    Alt+Shift+T rebuilds both ways;
+  - a selected container crosses screens and back with every window tiled
+    (this found the "takes effect when the client answers" bug);
+  - `kscreen-doctor output.eDP-1.disable` / `.enable` with a nested layout:
+    the laptop's layout sat beside the monitor's focused window as one unit,
+    then everything returned exactly (identical dumps);
+  - a real HDMI cable unplug: each layout moved as a unit. On replug, KWin
+    returned 4 of 5 windows and k3 the fifth; everything ended up where it
+    was;
+  - no errors, no idle churn, and `make check-keys` clean.
+- In the nested session also: a selection onto an empty screen and back
+  (found the redundant-wrapper problem), and the focus history after a
+  move (found and fixed).
+- **Not tested:** restoring a group that got mixed with other windows
+  meanwhile (k3 then moves them one by one, in order); per-screen desktops
+  combined with hotplug.
 
 **Phase 5: settings and polish**
 - `contents/config/main.xml` and `contents/ui/config.ui` for the §5.6 keys

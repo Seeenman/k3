@@ -16,13 +16,13 @@ multi-monitor support, plus an AeroSpace-style accordion for tabbed layouts.
 Everything up to the accordion is in daily use. Multi-monitor support is
 verified on real monitors: a monitor above a laptop screen scaled to 120%,
 with panels. That check found and fixed three bugs that virtual screens can't
-show. Next:
-- moving a selected container to another screen;
-- keeping layouts across an unplug and replug;
-- a binary tree layout as the new default.
+show. Since then:
+- a binary tree layout has become the default;
+- a selected container can move to another screen;
+- unplugging and replugging a monitor keeps its layouts.
 
-Then phase 5, a settings dialog in System Settings. See [PLAN.md](PLAN.md)
-for the design and the milestones.
+Next is phase 5, a settings dialog in System Settings. See
+[PLAN.md](PLAN.md) for the design and the milestones.
 
 ## Contents
 
@@ -65,8 +65,8 @@ make enable     # turn it on and load it into the running KWin
   qdbus6 org.kde.KWin /Scripting org.kde.kwin.Scripting.isScriptLoaded k3
   ```
 - **What happens when it loads:** k3 tiles the existing windows on every
-  desktop, side by side in a row. If you turn it off again (`make disable`),
-  windows stay where k3 put them.
+  screen and desktop, each as a [binary tree](#binary-tree-layout). If you
+  turn it off again (`make disable`), windows stay where k3 put them.
 - **Updating:** after pulling changes, run `make reload`. It reinstalls and
   restarts k3, and says so if k3 fails to load.
 
@@ -134,8 +134,11 @@ expected. Create as many desktops as you want workspaces in **System Settings
 - **A layout is a tree.** Containers arrange their children as a **row**
   (split horizontal), a **column** (split vertical), or **tabs**. Windows
   are the leaves.
-- **New windows go after the focused window,** in the focused window's
-  container. To choose where the *next* window goes, split first.
+- **New windows go next to the focused window.** In a
+  [binary tree](#binary-tree-layout), the default, a new window takes half
+  of the focused one. In a split layout (i3's), it goes after the focused
+  window in its container. Either way, to choose where the *next* window
+  goes, split first.
 - **Containers remember their last-focused child.** Moving focus into a
   container lands there.
 - **Containers tidy themselves up.** An empty container disappears. A
@@ -156,6 +159,7 @@ Every k3 action is in **System Settings → Keyboard → Shortcuts → KWin**, n
 | k3: Split Horizontal / Split Vertical | Alt+Shift+B / Alt+Shift+V | The next window opens beside / below the focused one |
 | k3: Toggle Split Direction | Alt+/ | Flip the container between row and column; tabs turn back into the split they came from |
 | k3: Toggle Tabbed | Alt+, | Turn the container into tabs (an accordion), and back |
+| k3: Toggle Binary Tree | Alt+Shift+T | Rebuild this screen and desktop's layout as a binary tree, or as one row |
 | k3: Toggle Floating | Alt+Shift+Space | Float a tiled window, or tile a floating one |
 | k3: Focus Parent / Focus Child | Alt+Shift+U / Alt+Shift+D | Select the container around the focused window, one level up per press / step back down |
 | k3: Focus Tiled/Floating | *(none)* | Jump between the tiled and the floating windows of this screen and desktop |
@@ -174,6 +178,7 @@ Starting from one window, A:
 
 1. Open B: `[A | B]`.
 2. On B, press Alt+Shift+V, then open C. C opens below B: `[A | [B / C]]`.
+   (In a binary tree it would anyway, since B is taller than wide.)
 3. Press Alt+Shift+U to select `[B / C]`, then Alt+Shift+H to move it
    left: `[[B / C] | A]`.
 4. Press Alt+Shift+D to step back down to the window, then Alt+, to turn B
@@ -198,6 +203,28 @@ accordion rather than i3's tabbed layout.
   other move.
 - **Back to a split:** Alt+/ or Alt+, turns the tabs back into the split
   they came from.
+
+### Binary tree layout
+
+This is like bspwm, or Hyprland's dwindle layout, and it's the default
+(`defaultLayout`).
+
+- **A new window halves the focused one,** along its longer side: beside it
+  if the focused window is wider than tall, below it otherwise. Closing a
+  window gives its space back to its neighbor.
+- **It's the same tree as always,** made of two-way splits. Focus, move,
+  resize, focus parent and the split keys all work as usual: Alt+/ flips a
+  pair, and Alt+, turns a pair into tabs.
+- **When the binary tree doesn't decide:**
+  - after Alt+Shift+B or Alt+Shift+V, the next window goes beside or below,
+    whatever the shape;
+  - a window opened from a tab becomes another tab.
+- **Switching (Alt+Shift+T)** rebuilds this screen and desktop's windows in
+  their current order: as a binary tree (each window halving the one before
+  it), or as a single row with i3's placement for new windows. Containers
+  and tabs are dropped.
+- **The choice lasts while the screen and desktop have windows.** Once the
+  last one closes, the next one starts over in the default layout.
 
 ### Floating windows
 
@@ -228,8 +255,11 @@ accordion rather than i3's tabbed layout.
 - **What acts on the selection:** move, split, Toggle Split Direction,
   Toggle Tabbed, resize and focus all act on the whole container, so
   Alt+Shift+H swaps it with its neighbor as a unit. Toggle Floating still
-  acts on the window, and a selected container doesn't move to another
-  screen.
+  acts on the window.
+- **Moving it to another screen:** at the edge of a screen, move takes the
+  container, layout and all, to the next screen, next to the focused window
+  there. On an empty screen it becomes that screen's whole layout and stays
+  selected, so it can move on.
 - **Deselecting:** Alt+Shift+D steps back down; reaching the window ends the
   selection. Any focus change, desktop switch or **mouse movement** also ends
   it. KWin's outline would otherwise block clicks.
@@ -249,7 +279,8 @@ accordion rather than i3's tabbed layout.
   another desktop joins that desktop's layout after its focused window.
 - **Several monitors:**
   - **Crossing screens:** focus and move continue onto the next screen at
-    the edge of a screen's layout, including onto an empty screen.
+    the edge of a screen's layout, including onto an empty screen. A
+    selected container moves as a unit.
   - **The keys follow the focused window,** not the mouse pointer: Alt+H/J/K/L
     walk from the screen the focused window is on, wherever the pointer
     rests.
@@ -258,11 +289,10 @@ accordion rather than i3's tabbed layout.
   - **KDE's screen actions:** *Window to Next Screen* works as well.
 - **Panels:** layouts stay clear of panels on each screen. When a panel
   appears, hides or changes size, k3 re-tiles within a second.
-- **Unplugging a monitor:** KWin moves its windows to a remaining screen and
-  k3 tiles them there. They arrive one by one after the focused window, so
-  their left-to-right order and their containers aren't kept. On replug,
-  KWin moves some of them back, but not reliably all: after a real cable
-  replug, most windows stayed where they were.
+- **Unplugging a monitor:** each of its layouts (one per desktop) moves to
+  a remaining screen as a unit, next to the focused window there. Order,
+  containers and tabs are kept. On replug, k3 puts them back where they
+  were.
 - **Per-screen desktops** (Plasma 6.7+): a window moved to another screen
   lands on the desktop that screen is showing.
 
@@ -282,8 +312,9 @@ a settings dialog, set them with `kwriteconfig6` and then run `make reload`.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `gapsInner` | `4` | px between tiled windows |
-| `gapsOuter` | `4` | px between tiled windows and the screen edge |
+| `defaultLayout` | `btree` | how each screen and desktop's layout starts: `btree` (a new window halves the focused one) or `split` (i3: a row, new windows after the focused one) |
+| `gapsInner` | `10` | px between tiled windows |
+| `gapsOuter` | `10` | px between tiled windows and the screen edge |
 | `tabPadding` | `30` | px of each hidden tab left showing beside the visible one (`0` = a plain stack) |
 | `resizeStep` | `5` | % of the container per resize press |
 | `floatAbove` | `true` | windows you float stay above the tiled ones |
@@ -315,8 +346,9 @@ make reload
 - **A key does nothing, or something else happens:** run
   `make check-keys`.
 - **A layout looks wrong:** bind and press *k3: Retile*. Reloading k3, or
-  restarting KWin or the session, rebuilds every layout from scratch as a
-  single row per screen and desktop. k3 can't save layouts.
+  restarting KWin or the session, rebuilds every layout from scratch in the
+  default layout (a binary tree per screen and desktop). k3 can't save
+  layouts.
 - **A window tiles but should float, or the other way round:** toggle it
   with Alt+Shift+Space. To make it permanent, find its class with
   `make logs` and add it to `floatClasses`.
@@ -355,6 +387,8 @@ Any settings you made stay in `kwinrc`. Remove them with
   and KWin can't move a desktop to another monitor.
 - **Tab direction follows position** (as in AeroSpace) instead of i3's
   separate tabbed and stacked layouts.
+- **New windows halve the focused one by default** (a binary tree, as in
+  bspwm). Alt+Shift+T, or `defaultLayout=split`, gives i3's placement.
 - **Not implemented (yet):** scratchpad, marks, `workspace back_and_forth`,
   mouse warping, and saving or restoring layouts. See the backlog in
   [PLAN.md](PLAN.md).
@@ -440,8 +474,13 @@ screen.
   - A selected container may move to another screen, as in i3.
   - On unplug, a screen's layouts keep their order (and their containers),
     and they're put back on replug.
-- **2026-11-02: binary tree layout requested,** to become the default for
-  new sessions. This revises "no autotiling" from the initial design.
+- **2026-11-02: binary tree layout, the new default.** This revises "no
+  autotiling" from the initial design.
+  - A new window halves the focused window along its longer side (as in
+    bspwm and Hyprland), rather than a spiral off the newest window.
+  - *Toggle Binary Tree* (Alt+Shift+T) rebuilds a screen and desktop's
+    layout both ways, rather than only changing where new windows go.
+  - `defaultLayout` sets the starting layout.
 
 ### Environment (dev machine)
 
@@ -716,7 +755,7 @@ Real monitors (the 2 screens under [Environment](#environment-dev-machine)):
   Settings. The other five stayed on the laptop. With `kscreen-doctor`,
   every window had returned. KWin seems to forget a window's home screen
   once the window is re-positioned (unconfirmed). So putting layouts back
-  on replug is k3's job (open decision (b), PLAN.md §8).
+  on replug is k3's job (decision (b); built, see below).
 - **Obsidian came out of the unplug maximized,** although it was tiled.
   Neither k3 nor the user maximized it, so KWin or the app did. Its geometry
   changed while its desktop was hidden, which suggests it runs under
@@ -730,6 +769,57 @@ Real monitors (the 2 screens under [Environment](#environment-dev-machine)):
   with the final build (Alt+J from the top monitor onto the empty laptop,
   and back).
 - **Clicking a tab's sliver** activates and raises that tab (checked live).
+
+### Binary tree and screen-move findings (2026-11-02)
+
+Moving windows between screens:
+- **`sendClientToScreen` takes effect when the client answers.** On real
+  Wayland clients, the window's output changes about 20ms after the call
+  (in the nested session, sooner). k3 had placed a moved container and
+  retiled it right away, while its windows still counted as on the old
+  screen, so they kept KWin's interim placement. **Fixed:** once the screen
+  changes are handled (below), k3 retiles the layout of every window whose
+  screen changed.
+- **k3 handles screen changes after KWin's burst.** On an unplug, KWin
+  moves every window off the lost screen within about 1ms, *before*
+  `screensChanged`. By the end of that burst the lost screen is gone from
+  `workspace.screens`. So k3 handles `outputChanged` from a 0ms single-shot
+  `QTimer`. By then it can tell which layouts lost their screen and move
+  each one whole (`rehome`), instead of window by window.
+- **Retile skips windows in transit.** While a window is on another screen
+  than its layout (its change not yet handled), k3 doesn't set its
+  geometry. Tiling it would pull it back. This matters on replug: KWin
+  returns some windows itself, and a retile of the remaining screen could
+  otherwise drag them back.
+- **Real replug, take two:** KWin moved 4 of 5 windows back itself this
+  time (2 of 7 before), and k3 moved the last one 74ms later. Every window
+  ended up in its old place and layout. With `kscreen-doctor`, the
+  before and after dumps were identical.
+- **A root with a single container child is redundant nesting.** k3 first
+  kept a container moved onto an empty screen as the root's only child, so
+  the selection would stay valid. The next "move left" then only stepped a
+  window out of that wrapper, with no visible change. Now the root takes
+  over the container's content (as `normalize` always did), and the
+  selection becomes the whole screen's layout. Commands that act on a
+  node's parent (split, Toggle Split Direction, Toggle Tabbed, focus parent)
+  handle a whole-screen selection, and moving one only moves it to other
+  screens.
+- **The focus history must follow a moved active window.** Otherwise the
+  next window that crossed over went next to the old focused window there.
+  `moveSubtree` now marks the active window as its new layout's focused
+  one, as `attachClient` does.
+
+Binary tree:
+- **Adopting builds a row, then rebuilds it.** At startup k3 adopts windows
+  into rows as before, then rebuilds each binary tree layout once
+  (`rebuildLayout`). Startup and Alt+Shift+T give the same shape, in
+  `windowList()` order.
+- **Shapes come from the layout, not from KWin.** Which way a window splits
+  is read from the rect k3 computes for it (`nodeRect`), never from its
+  lagging `frameGeometry`.
+- **Fractional scale:** at scale 1.2, KWin snaps a requested width of 387
+  to 386.67 (its device-pixel grid). That's within k3's one-pixel
+  tolerance, so it doesn't cause churn.
 
 ### References
 

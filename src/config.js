@@ -11,6 +11,9 @@ function readClassList(key, fallback) {
 }
 
 const config = {
+    // How a screen-and-desktop's layout starts: "btree" (a new window halves
+    // the focused one) or "split" (i3: new windows go in a row).
+    defaultLayout: String(readConfig("defaultLayout", "btree")).trim().toLowerCase(),
     gapsInner: Number(readConfig("gapsInner", 10)),
     gapsOuter: Number(readConfig("gapsOuter", 10)),
     tabPadding: Number(readConfig("tabPadding", 30)),         // px of hidden tabs left showing

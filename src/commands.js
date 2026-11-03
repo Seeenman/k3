@@ -82,7 +82,7 @@ function clearSelection() {
 // further up each time, stopping below the root.
 function focusParent() {
     onTarget(function (node, s) {
-        if (node.parent.type === "root") return;
+        if (!node.parent || node.parent.type === "root") return;
         selection = { node: node.parent, space: s };
     });
 }
@@ -118,8 +118,8 @@ function focusDirection(dir) {
     focusScreen(screen, dir);
 }
 
-// At the edge of a screen's layout, the window continues onto the next
-// screen. A selected container stays put.
+// At the edge of a screen's layout, the window or the selected container
+// continues onto the next screen.
 function moveDirection(dir) {
     let done = false;
     onTarget(function (node, s) {
@@ -128,7 +128,25 @@ function moveDirection(dir) {
             done = true;
         }
     });
-    if (!done && !selection) moveToScreen(dir);
+    if (done) return;
+    if (selection) moveSelectionToScreen(dir);
+    else moveToScreen(dir);
+}
+
+// i3 "move container to output": the selected container moves whole, with
+// its inner layout, onto the desktop the next screen shows, next to that
+// layout's focused window. It stays selected; on an empty screen that's the
+// whole screen's layout, which only moves on to other screens.
+function moveSelectionToScreen(dir) {
+    const s = selection.space;
+    const output = outputNamed(s.outputName);
+    const next = output && screenInDirection(output, dir);
+    if (!next) return;
+    const moved = moveSubtree(selection.node, s, next, workspace.currentDesktopForScreen(next));
+    // On an empty screen it's the whole layout now (its root took over its
+    // content): keep all of it selected, so it can move on as a unit.
+    selection = { node: moved.node.parent ? moved.node : moved.space.root, space: moved.space };
+    showSelection();
 }
 
 // The screen next to output in direction dir, or null.
@@ -215,6 +233,19 @@ function toggleTabbedLayout() {
         // Tabs share one rect: keep the focused one on top.
         workspace.raiseWindow(workspace.activeWindow);
     });
+}
+
+// Switch the active window's screen-and-desktop between a binary tree and
+// a single row, rebuilding it from its windows in their current order.
+function toggleBinaryTree() {
+    const c = activeTiled();
+    if (!c) return;
+    const s = spaces.get(c.key);
+    const geometry = spaceGeometry(s);
+    if (!geometry) return;
+    clearSelection();
+    rebuildLayout(s.root, !s.root.btree, geometry);
+    retile(s);
 }
 
 // sign: +1 grows, -1 shrinks; axis: "h" for width, "v" for height.

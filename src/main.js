@@ -36,6 +36,7 @@ const shortcuts = [
     ["k3-split-v", "Split Vertical", "Alt+Shift+V", function () { split("splitv"); }],
     ["k3-layout-toggle-split", "Toggle Split Direction", "Alt+/", toggleSplitLayout],
     ["k3-layout-tabbed", "Toggle Tabbed", "Alt+,", toggleTabbedLayout],
+    ["k3-layout-btree", "Toggle Binary Tree", "Alt+Shift+T", toggleBinaryTree],
     ["k3-float-toggle", "Toggle Floating", "Alt+Shift+Space", toggleFloating],
     ["k3-focus-mode-toggle", "Focus Tiled/Floating", "", focusModeToggle],
     ["k3-focus-parent", "Focus Parent", "Alt+Shift+U", focusParent],

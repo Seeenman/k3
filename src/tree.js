@@ -3,18 +3,20 @@
 // here, so test/tst_tree.qml can exercise it directly. See PLAN.md §5.1-5.2.
 //
 // Nodes are plain objects:
-//   root       { type: "root", layout, children, weights, focus, parent: null }
+//   root       { type: "root", layout, children, weights, focus, parent: null, btree }
 //   container  { type: "con",  layout, children, weights, focus, parent, pendingSplit }
 //   leaf       { type: "leaf", id, parent }
 // layout is "splith", "splitv" or "tabbed". weights[i] is children[i]'s share
 // of the split axis; they sum to 1. focus holds the same nodes as children,
 // most recently focused first. A tabbed container remembers the split layout
-// it came from in splitLayout.
+// it came from in splitLayout. A root with btree set is a binary tree
+// workspace: a new window halves the focused one (placeNode).
 
 const MIN_WEIGHT = 0.05;   // no child is resized below 5% of its parent
 
-function newRoot(layout) {
-    return { type: "root", layout: layout, children: [], weights: [], focus: [], parent: null };
+function newRoot(layout, btree) {
+    return { type: "root", layout: layout, children: [], weights: [], focus: [], parent: null,
+             btree: !!btree };
 }
 
 function newContainer(layout) {
@@ -76,6 +78,7 @@ function normalize(con) {
             con.weights = only.weights;
             con.focus = only.focus;
             con.children.forEach(function (c) { c.parent = con; });
+            only.parent = null;
         }
         return;
     }
@@ -148,6 +151,8 @@ function neighbor(node, dir) {
 // container, or step out of the current one; past the last tab, pop out of
 // the tabs. Returns false when node is already at the edge of the workspace.
 function moveNode(node, dir) {
+    // A whole workspace (a selection that became one) is at every edge.
+    if (!node.parent) return false;
     const parent = node.parent;
     const root = rootOf(node);
     const forward = isForward(dir);
@@ -259,6 +264,7 @@ function relocate(node, ref, after) {
 // container that waits for a second child.
 function splitNode(node, layout) {
     const parent = node.parent;
+    if (!parent) return;
     if (parent.children.length === 1) {
         parent.layout = layout;
         return;
@@ -266,17 +272,18 @@ function splitNode(node, layout) {
     wrap(node, layout).pendingSplit = true;
 }
 
-// i3 "layout toggle split" on node's container. A tabbed container goes back
-// to its split layout.
+// i3 "layout toggle split" on node's container (on node itself if it's a
+// root). A tabbed container goes back to its split layout.
 function toggleSplit(node) {
-    const con = node.parent;
+    const con = node.parent || node;
     if (con.layout === "tabbed") con.layout = con.splitLayout || "splith";
     else con.layout = con.layout === "splith" ? "splitv" : "splith";
 }
 
-// i3 "layout tabbed", as a toggle on node's container.
+// i3 "layout tabbed", as a toggle on node's container (on node itself if
+// it's a root).
 function toggleTabbed(node) {
-    const con = node.parent;
+    const con = node.parent || node;
     if (con.layout === "tabbed") {
         con.layout = con.splitLayout || "splith";
     } else {
@@ -302,6 +309,98 @@ function resizeNode(node, axis, delta) {
     w[i] += d;
     w[j] -= d;
     return true;
+}
+
+// --- placing new nodes ------------------------------------------------------
+// geometry is { area, gapsInner, gapsOuter, tabPadding }: what layoutRects
+// needs to know a window's current shape.
+
+// Put node (a new window, or a subtree moved in) into root next to anchor
+// (default: root's focused leaf). i3 puts it after anchor in anchor's
+// container. A binary tree root halves anchor's place instead, unless the
+// user split anchor's container for the next window or it holds tabs: those
+// get a plain insert, as in i3. Without geometry, a binary tree falls back to
+// i3 placement too. Into an empty root, a container's content becomes the
+// root's (normalize); the container is then detached (parent null).
+function placeNode(root, node, geometry, anchor) {
+    if (anchor === undefined) anchor = focusedLeaf(root);
+    if (!anchor) {
+        insertChild(root, node);
+        normalize(root);
+        return;
+    }
+    const con = anchor.parent;
+    if (root.btree && geometry && con.layout !== "tabbed" && !con.pendingSplit) splitBeside(root, anchor, node, geometry);
+    else insertAfter(anchor, node);
+}
+
+// Binary tree step: node takes the second half of target's place, beside it
+// if target is wider than tall, else below it. A lone child just turns its
+// parent the right way.
+function splitBeside(root, target, node, geometry) {
+    const g = geometry;
+    const r = nodeRect(root, target, g.area, g.gapsInner, g.gapsOuter, g.tabPadding);
+    const split = r.width >= r.height ? "splith" : "splitv";
+    if (target.parent.children.length === 1) {
+        target.parent.layout = split;
+        insertAfter(target, node);
+        return;
+    }
+    insertChild(wrap(target, split), node);
+}
+
+// Rebuild root from its windows, in their current order: as a binary tree
+// (each window halving the one before, along its longer side) or as a single
+// row. Containers and tabs are dropped; the focused window stays focused.
+function rebuildLayout(root, btree, geometry) {
+    const all = leaves(root);
+    const focused = focusedLeaf(root);
+    root.layout = "splith";
+    root.splitLayout = undefined;
+    root.children = [];
+    root.weights = [];
+    root.focus = [];
+    root.btree = btree;
+    all.forEach(function (leaf, i) {
+        leaf.parent = null;
+        if (i > 0 && btree) splitBeside(root, all[i - 1], leaf, geometry);
+        else insertChild(root, leaf);
+    });
+    if (focused) focusNode(focused);
+}
+
+// Empty root into one node: its only child, or a new container with root's
+// layout and children. The root keeps its btree mode.
+function takeContent(root) {
+    let node;
+    if (root.children.length === 1) {
+        node = root.children[0];
+    } else {
+        node = newContainer(root.layout);
+        node.splitLayout = root.splitLayout;
+        node.children = root.children;
+        node.weights = root.weights;
+        node.focus = root.focus;
+        node.children.forEach(function (c) { c.parent = node; });
+    }
+    root.children = [];
+    root.weights = [];
+    root.focus = [];
+    node.parent = null;
+    return node;
+}
+
+// The lowest node that contains all of nodes (in one tree), or null.
+function commonAncestor(nodes) {
+    const paths = nodes.map(function (n) {
+        const path = [];
+        for (; n; n = n.parent) path.unshift(n);
+        return path;
+    });
+    let lca = null;
+    for (let i = 0; paths.length && paths.every(function (p) { return p[i] && p[i] === paths[0][i]; }); i++)
+        lca = paths[0][i];
+    return lca;
 }
 
 // --- screens ----------------------------------------------------------------
