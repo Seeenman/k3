@@ -14,7 +14,7 @@ const config = {
     // How a screen-and-desktop's layout starts: "btree" (a new window halves
     // the focused one), "split" (i3: new windows go in a row) or "tabbed"
     // (new windows become tabs).
-    defaultLayout: String(readConfig("defaultLayout", "btree")).trim().toLowerCase(),
+    defaultLayout: String(readConfig("defaultLayout", "tabbed")).trim().toLowerCase(),
     gapsInner: Number(readConfig("gapsInner", 10)),
     gapsOuter: Number(readConfig("gapsOuter", 10)),
     tabPadding: Number(readConfig("tabPadding", 30)),         // px of hidden tabs left showing
