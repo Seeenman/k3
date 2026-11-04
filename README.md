@@ -315,7 +315,7 @@ a settings dialog, set them with `kwriteconfig6` and then run `make reload`.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `defaultLayout` | `btree` | how each screen and desktop's layout starts: `btree` (a new window halves the focused one) or `split` (i3: a row, new windows after the focused one) |
+| `defaultLayout` | `btree` | how each screen and desktop's layout starts: `btree` (a new window halves the focused one), `split` (i3: a row, new windows after the focused one) or `tabbed` (new windows become tabs; Alt+, turns them into a row) |
 | `gapsInner` | `10` | px between tiled windows |
 | `gapsOuter` | `10` | px between tiled windows and the screen edge |
 | `tabPadding` | `30` | px of each hidden tab left showing beside the visible one (`0` = a plain stack) |

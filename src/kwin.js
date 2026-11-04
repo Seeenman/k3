@@ -53,8 +53,10 @@ function sync(c) {
 function spaceFor(key, outputName, desktopId) {
     let s = spaces.get(key);
     if (!s) {
-        s = { key: key, root: newRoot("splith", config.defaultLayout === "btree"),
-              outputName: outputName, desktopId: desktopId, area: null };
+        const root = newRoot("splith", config.defaultLayout === "btree");
+        // Tabs that Alt+, turns back into a row.
+        if (config.defaultLayout === "tabbed") toggleTabbed(root);
+        s = { key: key, root: root, outputName: outputName, desktopId: desktopId, area: null };
         spaces.set(key, s);
     }
     return s;
@@ -367,6 +369,10 @@ function start() {
         const geometry = spaceGeometry(s);
         if (s.root.btree && geometry) rebuildLayout(s.root, true, geometry);
         retile(s);
+        // Adopted windows keep their old stacking, which may hide the
+        // focused tab.
+        const leaf = focusedLeaf(s.root);
+        if (leaf) raiseTab(clients.get(leaf.id));
     });
 
     // windowActivated arrives before windowAdded for a new window; that

@@ -365,7 +365,7 @@ They're hard-coded defaults until phase 5 adds the settings dialog.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `defaultLayout` | `"btree"` | how a root starts: `btree` (binary tree) or `split` (i3 placement) |
+| `defaultLayout` | `"btree"` | how a root starts: `btree` (binary tree), `split` (i3 placement) or `tabbed` (a tabbed root) |
 | `gapsInner` | 10 | px between tiles |
 | `gapsOuter` | 10 | px between tiles and the screen edge |
 | `floatClasses` | `"spectacle,org.kde.polkit-kde-authentication-agent-1,…"` | comma-separated window classes that always float |
