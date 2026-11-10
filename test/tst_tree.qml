@@ -264,18 +264,72 @@ TestCase {
 
     // --- moveNode (move <dir>) --------------------------------------------------
 
-    function test_move_swaps_with_sibling_window() {
+    function test_move_toward_window_joins_it_as_tabs() {
         const root = build("splith", ["a", "b", "c"])
         root.weights = [0.5, 0.25, 0.25]
         verify(Tree.moveNode(find(root, "a"), "right"))
-        compare(shape(root), "splith(b,a,c)")
-        fuzzyWeights(root.weights, [0.25, 0.5, 0.25])
+        compare(shape(root), "splith(tabbed(a,b),c)")
+        // a's share spreads over the row in proportion: b and c had equal shares.
+        fuzzyWeights(root.weights, [0.5, 0.5])
+        compare(Tree.focusedLeaf(root).id, "a")
+        compare(root.children[0].splitLayout, "splith")
     }
 
-    function test_move_swaps_vertically_inside_container() {
+    function test_move_toward_window_inside_container_joins_it() {
+        // The column is left with only the tabs and collapses; they run up/down as it did.
         const root = build("splith", ["a", ["splitv", "b", "c"]])
         verify(Tree.moveNode(find(root, "c"), "up"))
-        compare(shape(root), "splith(a,splitv(c,b))")
+        compare(shape(root), "splith(a,tabbed(b,c))")
+        compare(Tree.axisOf(root.children[1]), "v")
+    }
+
+    function test_moving_on_from_joined_tabs_swaps_and_back_undoes() {
+        const row = build("splith", ["x", "a", "b"])
+        Tree.moveNode(find(row, "a"), "right")
+        verify(Tree.moveNode(find(row, "a"), "right"))
+        compare(shape(row), "splith(x,b,a)")
+        fuzzyWeights(row.weights, [1/3, 1/3, 1/3])
+        const back = build("splith", ["x", "a", "b"])
+        Tree.moveNode(find(back, "a"), "right")
+        verify(Tree.moveNode(find(back, "a"), "left"))
+        compare(shape(back), "splith(x,a,b)")
+        fuzzyWeights(back.weights, [1/3, 1/3, 1/3])
+        // Two windows: the root becomes the tabs, which run along the move.
+        const two = build("splith", ["a", "b"])
+        Tree.moveNode(find(two, "a"), "right")
+        compare(shape(two), "tabbed(a,b)")
+        verify(Tree.moveNode(find(two, "a"), "right"))
+        compare(shape(two), "tabbed(b,a)")
+        verify(Tree.moveNode(find(two, "a"), "right"))
+        compare(shape(two), "splith(b,a)")
+        const twoBack = build("splith", ["a", "b"])
+        Tree.moveNode(find(twoBack, "a"), "right")
+        verify(Tree.moveNode(find(twoBack, "a"), "left"))
+        compare(shape(twoBack), "splith(a,b)")
+    }
+
+    function test_moves_keep_side_by_side_tab_groups_equal() {
+        // A window carried from one group to the other: out, then in.
+        const groups = build("splith", [["tabbed", "a", "b", "c"], ["tabbed", "d", "e"]])
+        verify(Tree.moveNode(find(groups, "c"), "right"))
+        compare(shape(groups), "splith(tabbed(a,b),c,tabbed(d,e))")
+        fuzzyWeights(groups.weights, [1/3, 1/3, 1/3])
+        verify(Tree.moveNode(find(groups, "c"), "right"))
+        compare(shape(groups), "splith(tabbed(a,b),tabbed(c,d,e))")
+        fuzzyWeights(groups.weights, [0.5, 0.5])
+        // A window joining its neighbor beside a tab group.
+        const beside = build("splith", [["tabbed", "x", "y"], "a", "b"])
+        verify(Tree.moveNode(find(beside, "a"), "right"))
+        compare(shape(beside), "splith(tabbed(x,y),tabbed(a,b))")
+        fuzzyWeights(beside.weights, [0.5, 0.5])
+    }
+
+    function test_toggle_tabbed_turns_joined_tabs_back_into_their_split() {
+        const root = build("splitv", ["x", "a", "b"])
+        Tree.moveNode(find(root, "b"), "up")
+        compare(shape(root), "splitv(x,tabbed(a,b))")
+        Tree.toggleTabbed(find(root, "b"))
+        compare(shape(root), "splitv(x,splitv(a,b))")
     }
 
     function test_move_into_container_next_to_its_focused_window() {
@@ -566,6 +620,39 @@ TestCase {
         fuzzyWeights(root.weights, [0.95, 0.05])
     }
 
+    // --- dropNode (mouse drop) ------------------------------------------------
+    // geometry() is 1600x900 without gaps: in [a | [b / c]], b is 800,0 800x450.
+
+    function test_drop_onto_window_joins_it_as_tabs() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        verify(Tree.dropNode(root, find(root, "a"), { x: 1000, y: 700 }, geometry()))
+        // a left the root, which absorbed the column; c's place holds the tabs.
+        compare(shape(root), "splitv(b,tabbed(a,c))")
+        compare(Tree.focusedLeaf(root).id, "a")
+    }
+
+    function test_drop_onto_tab_adds_a_tab_after_it() {
+        const root = build("splith", ["x", ["tabbed", "a", "b", "c"]])
+        Tree.focusNode(find(root, "b"))
+        const g = { area: rect(0, 0, 1600, 900), gapsInner: 0, gapsOuter: 0, tabPadding: 30 }
+        verify(Tree.dropNode(root, find(root, "x"), { x: 1200, y: 450 }, g))   // over b, on top
+        compare(shape(root), "tabbed(a,b,x,c)")
+        const sliver = build("splith", ["x", ["tabbed", "a", "b", "c"]])
+        Tree.focusNode(find(sliver, "b"))
+        verify(Tree.dropNode(sliver, find(sliver, "x"), { x: 1200, y: 10 }, g)) // a's sliver
+        compare(shape(sliver), "tabbed(a,x,b,c)")
+    }
+
+    function test_drop_on_a_gap_or_itself_does_nothing() {
+        const root = build("splith", ["a", "b"])
+        const g = { area: rect(0, 0, 1000, 500), gapsInner: 10, gapsOuter: 10, tabPadding: 0 }
+        verify(!Tree.dropNode(root, find(root, "a"), { x: 500, y: 250 }, g))   // between them
+        verify(!Tree.dropNode(root, find(root, "a"), { x: 100, y: 250 }, g))   // its own place
+        verify(!Tree.dropNode(root, find(root, "a"), { x: 2000, y: 250 }, g))  // off this screen
+        compare(shape(root), "splith(a,b)")
+        compare(Tree.leafAt(root, { x: 700, y: 250 }, g).id, "b")
+    }
+
     function test_drag_edge_skips_tabs_and_climbs_past_container_edges() {
         const tabs = build("splith", ["a", ["tabbed", "b", "c"]])
         verify(Tree.resizeEdge(tabs, find(tabs, "c"), "left", 160, geometry()))
@@ -579,12 +666,11 @@ TestCase {
 
     // --- containers as targets (focus parent) ---------------------------------
 
-    function test_move_container_swaps_as_a_unit() {
-        const root = build("splith", ["a", ["splitv", "b", "c"]])
-        root.weights = [0.3, 0.7]
-        verify(Tree.moveNode(root.children[1], "left"))
-        compare(shape(root), "splith(splitv(b,c),a)")
-        fuzzyWeights(root.weights, [0.7, 0.3])
+    function test_move_container_joins_window_as_a_unit() {
+        const root = build("splith", ["x", "a", ["splitv", "b", "c"]])
+        verify(Tree.moveNode(root.children[2], "left"))
+        compare(shape(root), "splith(x,tabbed(a,splitv(b,c)))")
+        fuzzyWeights(root.weights, [0.5, 0.5])
     }
 
     function test_move_container_across_root_axis() {

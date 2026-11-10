@@ -147,9 +147,10 @@ function neighbor(node, dir) {
     return null;
 }
 
-// i3 "move <dir>": swap with the neighbouring window, enter the neighbouring
-// container, or step out of the current one; past the last tab, pop out of
-// the tabs. Returns false when node is already at the edge of the workspace.
+// i3 "move <dir>": join the neighbouring window as tabs, enter the
+// neighbouring container, or step out of the current one. In tabs, reorder
+// them; past the last tab, pop out of the tabs. Returns false when node is
+// already at the edge of the workspace.
 function moveNode(node, dir) {
     // A whole workspace (a selection that became one) is at every edge.
     if (!node.parent) return false;
@@ -160,6 +161,14 @@ function moveNode(node, dir) {
         const i = parent.children.indexOf(node);
         const j = i + (forward ? 1 : -1);
         const sibling = parent.children[j];
+        // Toward a single window: the two become tabs, node on the side it
+        // came from. Moving on carries node out past the window (in a row of
+        // equal slots, two moves swap them); moving back undoes the join.
+        if (sibling && sibling.type === "leaf" && parent.layout !== "tabbed") {
+            joinTabs(node, sibling, !forward);
+            focusNode(node);
+            return true;
+        }
         if (sibling && sibling.type === "leaf") {
             parent.children[i] = sibling;
             parent.children[j] = node;
@@ -249,6 +258,21 @@ function descendToward(node, dir) {
             : node.focus[0];
     }
     return node;
+}
+
+// Put node and target (a window not in tabs) together as tabs in target's
+// place, node after target or before it. node's space goes to the rest of its
+// row in proportion, as when it leaves any other way, so a row of equal
+// slots stays equal. The tabs remember the split they're in, so toggling
+// tabbed turns them back into it.
+function joinTabs(node, target, after) {
+    const oldParent = node.parent;
+    const parent = target.parent;
+    detach(node);
+    const tabs = wrap(target, "tabbed");
+    tabs.splitLayout = parent.layout;
+    insertChild(tabs, node, after ? 1 : 0);
+    normalize(oldParent);
 }
 
 // Take node out of its container and put it next to ref.
@@ -371,6 +395,37 @@ function raiseOrder(node) {
     const kids = node.layout !== "tabbed" ? node.children
         : node.children.filter(function (c) { return c !== node.focus[0]; }).concat([node.focus[0]]);
     return kids.reduce(function (acc, c) { return acc.concat(raiseOrder(c)); }, []);
+}
+
+// --- mouse drops ------------------------------------------------------------
+
+// The window shown at point p in root's layout, or null over a gap. Tabs
+// overlap, and the one on top wins (raiseOrder).
+function leafAt(root, p, geometry) {
+    const g = geometry;
+    const rects = layoutRects(root, g.area, g.gapsInner, g.gapsOuter, g.tabPadding);
+    let hit = null;
+    raiseOrder(root).forEach(function (leaf) {
+        const r = rects.get(leaf.id);
+        if (p.x >= r.x && p.x < r.x + r.width && p.y >= r.y && p.y < r.y + r.height) hit = leaf;
+    });
+    return hit;
+}
+
+// A window (leaf) dropped at point p: onto a tab, it becomes the next tab;
+// onto a single window, the two become tabs (joinTabs), in their layout
+// order. Returns false when there's no other window at p.
+function dropNode(root, leaf, p, geometry) {
+    const target = leafAt(root, p, geometry);
+    if (!target || target === leaf) return false;
+    if (target.parent.layout === "tabbed") {
+        relocate(leaf, target, true);
+    } else {
+        const order = leaves(root);
+        joinTabs(leaf, target, order.indexOf(leaf) > order.indexOf(target));
+    }
+    focusNode(leaf);
+    return true;
 }
 
 // --- placing new nodes ------------------------------------------------------

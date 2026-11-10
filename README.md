@@ -153,7 +153,7 @@ Every k3 action is in **System Settings → Keyboard → Shortcuts → KWin**, n
 | Action | Default | What it does |
 |---|---|---|
 | k3: Focus Left / Down / Up / Right | Alt+H / J / K / L | Focus the neighboring window. Entering a container lands on its last-focused window. In tabs, the keys along the tabs' direction switch tabs. At the edge of a screen, focus goes on to the next screen, even an empty one. |
-| k3: Move Left / Down / Up / Right | Alt+Shift+H / J / K / L | Swap with the neighboring window, move into the neighboring container, or step out of the current one. In tabs, reorder them; past the first or last tab, the tab pops out. At the edge of a screen, the window moves to the next screen. |
+| k3: Move Left / Down / Up / Right | Alt+Shift+H / J / K / L | Join the neighboring window as tabs, move into the neighboring container, or step out of the current one. Moving on from the joined tabs carries the window past the other one, so two presses swap them (three when they're the only two windows); moving back undoes the join. In tabs, reorder them; past the first or last tab, the tab pops out. At the edge of a screen, the window moves to the next screen. |
 | k3: Grow Width / Shrink Width | Ctrl+Alt+L / Ctrl+Alt+H | Resize by `resizeStep` (default 5%) of the container, trading space with the neighbor. Nothing gets smaller than 5%. |
 | k3: Grow Height / Shrink Height | Ctrl+Alt+J / Ctrl+Alt+K | The same, vertically |
 | k3: Split Horizontal / Split Vertical | Alt+Shift+B / Alt+Shift+V | The next window opens beside / below the focused one |
@@ -301,9 +301,12 @@ This is like bspwm, or Hyprland's dwindle layout, and it's the default
 
 ### Mouse
 
-- **Tiled windows snap back:** a tiled window you drag, or quick-tile
-  (Meta+arrow, dragging to a screen edge), returns to its slot. Use the move
-  keys to rearrange.
+- **Dropping a tiled window on another one joins them as tabs.** Dropped on
+  a tab, it becomes the next tab. The pointer picks the target, and that
+  works across screens too.
+- **Otherwise tiled windows snap back:** a tiled window you drop on a gap, or
+  quick-tile (Meta+arrow, dragging to a screen edge), returns to its slot.
+  Use the move keys to rearrange.
 - **Resizing a tiled window by an edge or corner** works like the grow and
   shrink keys, applied when you let go. The edge stays where you dropped it,
   and the window across that edge makes room. When the window shares a
@@ -397,6 +400,8 @@ Any settings you made stay in `kwinrc`. Remove them with
   and KWin can't move a desktop to another monitor.
 - **Tab direction follows position** (as in AeroSpace) instead of i3's
   separate tabbed and stacked layouts.
+- **Moving toward a window joins it as tabs** instead of swapping with it.
+  Moving on swaps them.
 - **New windows halve the focused one by default** (a binary tree, as in
   bspwm). Alt+Shift+T, or `defaultLayout=split`, gives i3's placement.
 - **Not implemented (yet):** scratchpad, marks, `workspace back_and_forth`,

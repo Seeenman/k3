@@ -329,8 +329,9 @@ function addWindow(w) {
     w.minimizedChanged.connect(onSync);
     w.fullScreenChanged.connect(onRetile);
     w.maximizedChanged.connect(onRetile);
-    // A tiled window dragged with the mouse snaps back. One resized with the
-    // mouse keeps the edges the user dragged, and its neighbors make room.
+    // A tiled window dropped on another one joins it as tabs; dropped
+    // elsewhere, it snaps back. One resized with the mouse keeps the edges
+    // the user dragged, and its neighbors make room.
     w.interactiveMoveResizeStarted.connect(guarded(function () { startDrag(c); }));
     w.interactiveMoveResizeStepped.connect(guarded(function (rect) {
         if (c.drag) c.drag.to = copyRect(rect);
@@ -357,17 +358,24 @@ function startDrag(c) {
         ? { key: c.key, from: copyRect(w.frameGeometry), to: null } : null;
 }
 
-// A resize goes into the layout (dragResize). Then the window snaps to its
-// slot, which a plain move leaves where it was.
+// A resize goes into the layout (dragResize). A move dropped on another
+// window joins it as tabs (dropNode); the pointer says where, since a window
+// that crossed screens during the drag is already in that screen's layout.
+// Then the window snaps to its slot.
 function finishDrag(c) {
     const d = c.drag;
     c.drag = null;
-    if (d && d.to && c.key === d.key) {
-        const s = spaces.get(c.key);
-        const geometry = spaceGeometry(s);
-        if (geometry) dragResize(s.root, c.leaf, d.from, d.to, geometry);
+    const s = d && d.to && c.key && spaces.get(c.key);
+    const geometry = s && spaceGeometry(s);
+    let dropped = false;
+    if (geometry) {
+        const moved = Math.abs(d.to.width - d.from.width) < 1 && Math.abs(d.to.height - d.from.height) < 1;
+        if (moved) dropped = dropNode(s.root, c.leaf, workspace.cursorPos, geometry);
+        else if (c.key === d.key) dragResize(s.root, c.leaf, d.from, d.to, geometry);
     }
     retileClient(c);
+    // Tabs share one rect: show the dropped window's tab, all of it.
+    if (dropped) raiseTab(c);
 }
 
 // Undo KDE states that conflict with tiling: some apps restore a maximized

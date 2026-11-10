@@ -73,7 +73,7 @@ virtual desktops.
 | Showing which container is selected (focus parent) | `workspace.showOutline(x, y, w, h)` / `hideOutline()`. It persists until hidden and animates when given a new rect. Phase 0 saw an opaque gray fill. In phase 3 it drew as KWin's translucent quick-tile preview (Plasma's `widgets/translucentbackground`), washing over the selected container. Live it looks fine, but it **swallows mouse clicks**. So any pointer movement (`workspace.cursorPosChanged`) ends the selection and hides the outline, and the click goes through. |
 | Focusing an empty screen | KWin focus is per window. In Plasma every screen has a desktop window, and k3 activates that. `workspace.slotSwitchToLeftScreen` / `…Right…` / `…Above…` / `…Below…` (confirmed in phase 0) step from KWin's active screen, which follows the pointer, so k3 only uses them in a bare KWin (phase 4, real monitors) |
 | Window lifecycle edge cases | Apps that open maximized, min-size limits bigger than their tile, Wayland apps that set `app_id` late, transients that turn into normal windows |
-| Dragging a tiled window with the mouse | v1: the window snaps back on `interactiveMoveResizeFinished`. Drop-to-reposition goes in the backlog. Resizing by an edge updates the weights (`dragResize`, added 2026-11-10). |
+| Dragging a tiled window with the mouse | v1: the window snaps back on `interactiveMoveResizeFinished`. Since 2026-11-10: dropped on another window it joins it as tabs (`dropNode`), and resizing by an edge updates the weights (`dragResize`). |
 | Feedback for split direction and tab position (i3 shows these with borders) | Optional: Plasma OSD over D-Bus (`org.kde.osdService.showText`, confirmed present on this machine) |
 | Scratchpad (backlog) | Hide the window (minimize + skip taskbar) and bring it back floating and centered |
 
@@ -202,7 +202,7 @@ reachable through the qualifier (`test/tst_engine.qml` guards this).
 | `w.outputChanged` | The same `sync()`, but from a 0ms single-shot `QTimer`, after KWin's burst of changes (`flushSyncs`). First `rehome()`. **Unplug:** each layout whose screen is gone moves whole (`moveSubtree`) next to the focused window where KWin put its windows, which remember that screen (`home`). **Replug:** windows whose home is back are moved there by k3, as the smallest subtree that holds just them. KWin returns only some itself. Then the syncs, then a retile of every layout a window entered: `sendClientToScreen` takes effect only when the client answers. This covers KDE's *Window to Next Screen* and hotplug. |
 | `w.tileChanged` | KDE quick-tiled a tiled window (e.g. Meta+arrow): release it and retile, so it snaps back |
 | `w.fullScreenChanged`, `w.maximizedChanged` | Exclude or include the leaf, then retile |
-| `w.interactiveMoveResizeStarted` / `…Stepped` / `…Finished` | A mouse resize goes into the weights: each dragged edge moves the window's edge by as much, trading with the neighbor across it under the nearest ancestor split along that axis (`resizeEdge`). The size comes from the last `Stepped` rect, since `frameGeometry` lags the client. Then retile, so a plain move snaps back. Drop-to-reposition is in the backlog. |
+| `w.interactiveMoveResizeStarted` / `…Stepped` / `…Finished` | A mouse resize goes into the weights: each dragged edge moves the window's edge by as much, trading with the neighbor across it under the nearest ancestor split along that axis (`resizeEdge`). The size comes from the last `Stepped` rect, since `frameGeometry` lags the client. A move (no size change) dropped on another window joins it as tabs: the target is the window k3's layout shows under `workspace.cursorPos` (`leafAt`), since the dragged window covers it in KWin's stacking. Then retile, so anything else snaps back. |
 | `workspace.currentDesktopChanged`, `screensChanged`, `virtualScreenGeometryChanged` | Retile the visible roots. `screensChanged` also runs `flushSyncs`, so a replugged screen gets its windows back even if KWin returned none. Retile skips any window that's on another screen than its root: it's in transit, and tiling it would pull it back. |
 | every second (`QTimer`) | Retile each visible root whose usable area (`clientArea`) differs from the one it was last laid out in. KWin has no signal for a panel appearing, hiding or changing size (phase 4, real monitors). |
 
@@ -263,7 +263,18 @@ them.
   - **A floating window is focused:** do nothing.
 - **move ⟨dir⟩**:
   - If the sibling in that direction (in a parent on the matching axis) is a
-    leaf, swap with it.
+    leaf, join it as tabs (`joinTabs`, 2026-11-10; it was a swap before).
+    The window stays on the side it came from, so moving back undoes the
+    join; moving on carries it out past the other window. Inside tabs, the
+    sibling is another tab, and the move reorders them as before.
+  - Space follows i3's rule for every move, joins included: a window
+    arriving in a row takes an equal share and the rest shrink in
+    proportion; one leaving gives its share back in proportion. A row of
+    equal slots therefore stays equal: side-by-side tab groups stay 50/50
+    as windows move between them, and two moves swap two windows in place.
+    (Giving the joined tabs both slots and halving them on the way out kept
+    hand-set sizes exactly, but left tab groups at 33/67; you chose this rule
+    instead on 2026-11-10.)
   - If that sibling is a container, move into it, next to the leaf found by
     walking down: on the move's axis take the near edge, across it take the
     focused child. That's i3's `con_descend_direction`. Moving *down* into a
@@ -679,9 +690,9 @@ Easiest first:
   after split / layout commands. Without it nothing shows the split direction
   or tab position, because k3 keeps KDE titlebars and draws no borders.
 - Scratchpad: send to scratchpad / toggle scratchpad.
-- Mouse sync: when a tiled window is dropped, re-insert it next to the window
-  under the cursor (`workspace.windowAt`). (Mouse resize updating the weights
-  was added 2026-11-10.)
+- Mouse sync: dropping a tiled window on a gap could re-insert it there, beside
+  the nearest window. (Since 2026-11-10, a drop on a window joins it as tabs and
+  a mouse resize updates the weights.)
 - Cursor follows focus across outputs: invoke KWin's `MoveMouseToFocus` via
   kglobalaccel D-Bus.
 - Separate trees per KDE Activity: add `currentActivity` to the root key.
