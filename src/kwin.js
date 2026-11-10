@@ -316,9 +316,10 @@ function addWindow(w) {
     // keptAbove: k3 set keepAbove when floating it.
     // lastRect: the geometry k3 last requested for it (see retile).
     // home: the screen it was evacuated from on an unplug (see rehome).
+    // drag: the mouse move or resize in progress (see startDrag).
     const c = { window: w, floating: kind === "float", leaf: newLeaf(windowId(w)), key: null,
                 floatRect: copyRect(w.frameGeometry), keptAbove: false, lastRect: null,
-                home: null };
+                home: null, drag: null };
     clients.set(windowId(w), c);
     if (!c.floating) claim(w);
     const onSync = guarded(function () { sync(c); });
@@ -328,8 +329,13 @@ function addWindow(w) {
     w.minimizedChanged.connect(onSync);
     w.fullScreenChanged.connect(onRetile);
     w.maximizedChanged.connect(onRetile);
-    // A tiled window dragged or resized with the mouse snaps back.
-    w.interactiveMoveResizeFinished.connect(onRetile);
+    // A tiled window dragged with the mouse snaps back. One resized with the
+    // mouse keeps the edges the user dragged, and its neighbors make room.
+    w.interactiveMoveResizeStarted.connect(guarded(function () { startDrag(c); }));
+    w.interactiveMoveResizeStepped.connect(guarded(function (rect) {
+        if (c.drag) c.drag.to = copyRect(rect);
+    }));
+    w.interactiveMoveResizeFinished.connect(guarded(function () { finishDrag(c); }));
     // So does one quick-tiled by KDE (e.g. Meta+arrow).
     w.tileChanged.connect(guarded(function () {
         if (c.key && w.tile) {
@@ -338,6 +344,30 @@ function addWindow(w) {
         }
     }));
     sync(c);
+}
+
+// A mouse move or resize of a tiled window: where the window was when it
+// began (from), and the last rect KWin asked for during it (to). Reading
+// frameGeometry at the end instead would lag: the client may not have caught
+// up with the last step yet. A maximized or fullscreen window has no slot
+// shape to resize.
+function startDrag(c) {
+    const w = c.window;
+    c.drag = c.key && !w.fullScreen && w.maximizeMode === 0
+        ? { key: c.key, from: copyRect(w.frameGeometry), to: null } : null;
+}
+
+// A resize goes into the layout (dragResize). Then the window snaps to its
+// slot, which a plain move leaves where it was.
+function finishDrag(c) {
+    const d = c.drag;
+    c.drag = null;
+    if (d && d.to && c.key === d.key) {
+        const s = spaces.get(c.key);
+        const geometry = spaceGeometry(s);
+        if (geometry) dragResize(s.root, c.leaf, d.from, d.to, geometry);
+    }
+    retileClient(c);
 }
 
 // Undo KDE states that conflict with tiling: some apps restore a maximized

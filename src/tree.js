@@ -302,13 +302,54 @@ function resizeNode(node, axis, delta) {
                         || n.parent.children.length < 2))
         n = n.parent;
     if (!n.parent) return false;
-    const w = n.parent.weights;
     const i = n.parent.children.indexOf(n);
-    const j = i + 1 < w.length ? i + 1 : i - 1;
+    tradeWeight(n.parent, i, i + 1 < n.parent.children.length ? i + 1 : i - 1, delta);
+    return true;
+}
+
+// Move delta of parent's weight from child j to child i (negative: from i to
+// j), keeping both at MIN_WEIGHT or more.
+function tradeWeight(parent, i, j, delta) {
+    const w = parent.weights;
     const d = Math.max(MIN_WEIGHT - w[i], Math.min(delta, w[j] - MIN_WEIGHT));
     w[i] += d;
     w[j] -= d;
+}
+
+// Mouse resize of one edge: move node's edge on side dir out by px pixels (in
+// for a negative px). The room comes from the neighbor on that side, under
+// the nearest ancestor split along dir's axis. As with resizeNode, whatever
+// shares that ancestor's child with node grows too, and a tabbed container
+// grows as a whole. Returns false at the workspace edge.
+function resizeEdge(root, node, dir, px, geometry) {
+    const step = isForward(dir) ? 1 : -1;
+    let n = node;
+    while (n.parent && (n.parent.layout === "tabbed" || axisOf(n.parent) !== dirAxis(dir)
+                        || !n.parent.children[n.parent.children.indexOf(n) + step]))
+        n = n.parent;
+    if (!n.parent) return false;
+    const parent = n.parent;
+    const g = geometry;
+    const r = nodeRect(root, parent, g.area, g.gapsInner, g.gapsOuter, g.tabPadding);
+    const free = (dirAxis(dir) === "h" ? r.width : r.height) - g.gapsInner * (parent.children.length - 1);
+    const i = parent.children.indexOf(n);
+    tradeWeight(parent, i, i + step, px / free);
     return true;
+}
+
+// A mouse resize, given the window's rect when it began (from) and at its end
+// (to): each edge the user dragged moves node's edge by as much (resizeEdge).
+// A resize drags one edge per axis, the one that moved further; an axis whose
+// size didn't change wasn't resized, so a plain move does nothing.
+function dragResize(root, node, from, to, geometry) {
+    [{ near: "left", far: "right", pos: "x", size: "width" },
+     { near: "up", far: "down", pos: "y", size: "height" }].forEach(function (a) {
+        if (Math.abs(to[a.size] - from[a.size]) < 1) return;
+        const near = from[a.pos] - to[a.pos];
+        const far = to[a.pos] + to[a.size] - (from[a.pos] + from[a.size]);
+        if (Math.abs(near) > Math.abs(far)) resizeEdge(root, node, a.near, near, geometry);
+        else resizeEdge(root, node, a.far, far, geometry);
+    });
 }
 
 // --- stacking tabs ----------------------------------------------------------

@@ -304,6 +304,13 @@ This is like bspwm, or Hyprland's dwindle layout, and it's the default
 - **Tiled windows snap back:** a tiled window you drag, or quick-tile
   (Meta+arrow, dragging to a screen edge), returns to its slot. Use the move
   keys to rearrange.
+- **Resizing a tiled window by an edge or corner** works like the grow and
+  shrink keys, applied when you let go. The edge stays where you dropped it,
+  and the window across that edge makes room. When the window shares a
+  container with others, the whole container grows or shrinks. Dragging the
+  side between two windows of the container only resizes those two. An edge
+  on the screen edge snaps back. Esc may not cancel a mouse resize: k3 can't
+  tell a cancelled one apart.
 - **Clicking a window focuses it** as usual, and clicking a tab's sliver
   switches to that tab.
 - **Floating windows** can be dragged and resized freely.

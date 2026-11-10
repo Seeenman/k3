@@ -515,6 +515,68 @@ TestCase {
         fuzzyWeights(root.children[1].weights, [0.4, 0.6])
     }
 
+    // --- dragResize (mouse resize) -------------------------------------------
+    // geometry() is 1600x900 without gaps: in [a | [b / c]], b is 800,0 800x450.
+
+    function test_drag_edge_moves_by_the_dragged_pixels() {
+        const root = build("splith", ["a", "b"])
+        const g = { area: rect(0, 0, 1000, 500), gapsInner: 10, gapsOuter: 0, tabPadding: 0 }
+        Tree.dragResize(root, find(root, "a"), rect(0, 0, 495, 500), rect(0, 0, 595, 500), g)
+        const rects = Tree.layoutRects(root, g.area, 10, 0)
+        compare(rects.get("a"), rect(0, 0, 595, 500))
+        compare(rects.get("b"), rect(605, 0, 395, 500))
+    }
+
+    function test_drag_left_edge_trades_with_left_neighbor() {
+        const root = build("splith", ["a", "b", "c"])
+        const g = { area: rect(0, 0, 1200, 600), gapsInner: 0, gapsOuter: 0, tabPadding: 0 }
+        Tree.dragResize(root, find(root, "b"), rect(400, 0, 400, 600), rect(340, 0, 460, 600), g)
+        fuzzyWeights(root.weights, [1/3 - 0.05, 1/3 + 0.05, 1/3])
+    }
+
+    function test_drag_grows_the_windows_in_a_container_together() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        Tree.dragResize(root, find(root, "b"), rect(800, 0, 800, 450), rect(640, 0, 960, 450), geometry())
+        fuzzyWeights(root.weights, [0.4, 0.6])
+        fuzzyWeights(root.children[1].weights, [0.5, 0.5])
+        compare(Tree.layoutRects(root, geometry().area, 0, 0).get("c"), rect(640, 450, 960, 450))
+    }
+
+    function test_drag_corner_resizes_both_axes() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        Tree.dragResize(root, find(root, "b"), rect(800, 0, 800, 450), rect(640, 0, 960, 540), geometry())
+        fuzzyWeights(root.weights, [0.4, 0.6])
+        fuzzyWeights(root.children[1].weights, [0.6, 0.4])
+    }
+
+    function test_drag_move_or_workspace_edge_changes_nothing() {
+        const root = build("splith", ["a", ["splitv", "b", "c"]])
+        const b = find(root, "b")
+        Tree.dragResize(root, b, rect(800, 0, 800, 450), rect(700, 30, 800, 450), geometry())   // a move
+        Tree.dragResize(root, b, rect(800, 0, 800, 450), rect(800, 0, 900, 450), geometry())    // right edge
+        Tree.dragResize(root, b, rect(800, 0, 800, 450), rect(800, -50, 800, 500), geometry())  // top edge
+        fuzzyWeights(root.weights, [0.5, 0.5])
+        fuzzyWeights(root.children[1].weights, [0.5, 0.5])
+        verify(!Tree.resizeEdge(root, find(root, "a"), "left", 100, geometry()))
+    }
+
+    function test_drag_clamps_at_minimum() {
+        const root = build("splith", ["a", "b"])
+        Tree.dragResize(root, find(root, "a"), rect(0, 0, 800, 900), rect(0, 0, 3000, 900), geometry())
+        fuzzyWeights(root.weights, [0.95, 0.05])
+    }
+
+    function test_drag_edge_skips_tabs_and_climbs_past_container_edges() {
+        const tabs = build("splith", ["a", ["tabbed", "b", "c"]])
+        verify(Tree.resizeEdge(tabs, find(tabs, "c"), "left", 160, geometry()))
+        fuzzyWeights(tabs.weights, [0.4, 0.6])
+        // b is on the right edge of [a | b]: the room comes from x, and a grows too.
+        const nested = build("splith", [["splith", "a", "b"], "x"])
+        verify(Tree.resizeEdge(nested, find(nested, "b"), "right", 160, geometry()))
+        fuzzyWeights(nested.weights, [0.6, 0.4])
+        fuzzyWeights(nested.children[0].weights, [0.5, 0.5])
+    }
+
     // --- containers as targets (focus parent) ---------------------------------
 
     function test_move_container_swaps_as_a_unit() {
